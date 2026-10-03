@@ -423,7 +423,14 @@ def lookup_podcast(id: str, country: str = "us"):
                 "artworkUrl600": upgrade_to_hd_image(item.get("artworkUrl600") or item.get("artworkUrl100")),
                 "feedUrl": feed_url,
                 "hasTranscript": feed_data.get("hasTranscript", False),
-                "feedData": feed_data
+                "feedData": feed_data,
+                "feed": feed_data,
+                "meta": {
+                    "collectionId": item.get("collectionId"),
+                    "artistName": item.get("artistName"),
+                    "collectionName": item.get("collectionName"),
+                    "artworkUrl600": upgrade_to_hd_image(item.get("artworkUrl600") or item.get("artworkUrl100")),
+                }
             }
         raise HTTPException(status_code=404, detail="Podcast not found")
     except HTTPException:
