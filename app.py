@@ -310,7 +310,7 @@ async def ask_podcast_ai(request: Request):
 回答使用流畅自然的中文，可适当使用 Markdown 格式（粗体、列表、引用等），便于排版阅读。"""
 
     try:
-        model_name = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
+        model_name = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite")
         response = gemini_client.models.generate_content(
             model=model_name,
             contents=prompt,
