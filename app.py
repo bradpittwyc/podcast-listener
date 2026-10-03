@@ -36,9 +36,10 @@ whisper_model = None
 def get_whisper_model():
     global whisper_model
     if whisper_model is None:
-        print("Loading Whisper AI model (base)...")
-        whisper_model = faster_whisper.WhisperModel("base", device="cpu", compute_type="int8")
-        print("Whisper AI (base) ready.")
+        print("Loading Whisper AI model (small.en)...")
+        # Use small.en for English podcasts with high accuracy on CPU
+        whisper_model = faster_whisper.WhisperModel("small.en", device="cpu", compute_type="int8")
+        print("Whisper AI (small.en) ready.")
     return whisper_model
 
 def upgrade_to_hd_image(img_url: str) -> str:
@@ -179,22 +180,34 @@ def get_or_generate_transcript(audio_url: str, title: str, transcript_url: str =
             r.raise_for_status()
             with open(tmp_path, "wb") as f:
                 downloaded = 0
+                # Download up to 60MB (~30-45 mins of podcast audio)
                 for chunk in r.iter_content(chunk_size=512 * 1024):
                     f.write(chunk)
                     downloaded += len(chunk)
-                    if downloaded > 12 * 1024 * 1024:
+                    if downloaded > 60 * 1024 * 1024:
                         break
 
         model = get_whisper_model()
-        segments, _ = model.transcribe(tmp_path, beam_size=5, vad_filter=True)
+        # Enforce English language and initial prompt to prevent language mis-detection & hallucinations
+        segments, _ = model.transcribe(
+            tmp_path,
+            language="en",
+            beam_size=5,
+            vad_filter=True,
+            vad_parameters=dict(min_silence_duration_ms=500),
+            initial_prompt="This is an English podcast episode transcript."
+        )
 
         vtt_lines = ["WEBVTT", ""]
+        prev_text = ""
         for seg in segments:
             s = format_timestamp_vtt(seg.start)
             e = format_timestamp_vtt(seg.end)
             text = seg.text.strip()
-            if text:
+            # Filter empty lines and consecutive duplicate hallucinations
+            if text and text != prev_text:
                 vtt_lines.append(f"{s} --> {e}\n{text}\n")
+                prev_text = text
 
         vtt_content = "\n".join(vtt_lines)
         with open(vtt_path, "w", encoding="utf-8") as f:
