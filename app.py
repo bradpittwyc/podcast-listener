@@ -32,6 +32,8 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 os.makedirs(STATIC_DIR, exist_ok=True)
 
+app.mount("/cache", StaticFiles(directory=CACHE_DIR), name="cache")
+
 whisper_model = None
 
 def get_whisper_model():
@@ -171,37 +173,35 @@ def get_or_generate_transcript(audio_url: str, title: str = "", transcript_url: 
         except Exception:
             pass
 
-    # 2. Use MD5 hash of audio_url as unique cache key (prevents title collisions and file encoding bugs)
+    # 2. Use MD5 hash of audio_url as unique cache key
     url_hash = hashlib.md5(audio_url.encode("utf-8")).hexdigest()
     vtt_path = os.path.join(CACHE_DIR, f"{url_hash}.vtt")
+    mp3_path = os.path.join(CACHE_DIR, f"{url_hash}.mp3")
+    local_audio = f"/cache/{url_hash}.mp3"
 
-    if os.path.exists(vtt_path) and not force_refresh:
+    if os.path.exists(vtt_path) and os.path.exists(mp3_path) and not force_refresh:
         with open(vtt_path, "r", encoding="utf-8") as f:
             content = f.read()
             if content.strip():
-                return {"source": "local_cache", "vtt": content}
+                return {"source": "local_cache", "vtt": content, "local_audio": local_audio}
 
-    tmp_path = os.path.join(CACHE_DIR, f"{url_hash}_temp.mp3")
     try:
-        # 3. Stream download audio file (up to 12MB ~ 10 mins of speech)
-        with requests.get(audio_url, headers=headers, stream=True, allow_redirects=True, timeout=30) as r:
-            r.raise_for_status()
-            with open(tmp_path, "wb") as f:
-                downloaded = 0
-                for chunk in r.iter_content(chunk_size=256 * 1024):
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    if downloaded > 12 * 1024 * 1024:
-                        break
+        # 3. Download the FULL audio file to ensure 100% sync with frontend (Bypass Dynamic Ad Insertion mismatch)
+        if not os.path.exists(mp3_path) or force_refresh:
+            with requests.get(audio_url, headers=headers, stream=True, allow_redirects=True, timeout=30) as r:
+                r.raise_for_status()
+                with open(mp3_path, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=512 * 1024):
+                        f.write(chunk)
 
-        # Validate downloaded audio file size
-        if not os.path.exists(tmp_path) or os.path.getsize(tmp_path) < 50 * 1024:
-            raise HTTPException(status_code=400, detail="Downloaded audio file is invalid or too small.")
+            # Validate downloaded audio file size
+            if not os.path.exists(mp3_path) or os.path.getsize(mp3_path) < 100 * 1024:
+                raise HTTPException(status_code=400, detail="Downloaded audio file is invalid or too small.")
 
         # 4. Transcribe using faster-whisper (base.en model)
         model = get_whisper_model()
         segments, _ = model.transcribe(
-            tmp_path,
+            mp3_path,
             language="en",
             beam_size=1,
             best_of=1,
@@ -224,16 +224,9 @@ def get_or_generate_transcript(audio_url: str, title: str = "", transcript_url: 
         with open(vtt_path, "w", encoding="utf-8") as f:
             f.write(vtt_content)
 
-        return {"source": "whisper_ai", "vtt": vtt_content}
+        return {"source": "whisper_ai", "vtt": vtt_content, "local_audio": local_audio}
     except Exception as e:
         return {"source": "error", "detail": str(e), "vtt": ""}
-    finally:
-        # Always clean up temporary audio file
-        if os.path.exists(tmp_path):
-            try:
-                os.remove(tmp_path)
-            except Exception:
-                pass
 
 @app.api_route("/api/define", methods=["GET", "POST", "HEAD"])
 def define_word(word: str = Query(..., min_length=1), context: str = ""):
