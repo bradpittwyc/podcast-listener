@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import hashlib
 import urllib.parse
 import xml.etree.ElementTree as ET
 import requests
@@ -152,43 +153,53 @@ def format_timestamp_vtt(seconds: float) -> str:
     return f"{hrs:02d}:{mins:02d}:{secs:06.3f}"
 
 @app.get("/api/transcribe")
-def get_or_generate_transcript(audio_url: str, title: str, transcript_url: str = ""):
+def get_or_generate_transcript(audio_url: str, title: str = "", transcript_url: str = "", force_refresh: bool = False):
     """
-    Returns VTT subtitle content.
-    Priority: (1) official VTT from RSS, (2) local cache, (3) Whisper AI generation.
-    Audio is only temporarily buffered for AI transcription and immediately deleted.
-    AI-generated subtitles are assistive tools — not official transcripts.
+    Returns VTT subtitle content with strict URL-to-subtitle mapping using MD5 hash.
+    Priority: (1) official VTT from RSS, (2) MD5-hashed local cache, (3) Whisper AI generation.
     """
-    headers = {'User-Agent': 'Mozilla/5.0'}
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
 
-    if transcript_url:
+    # 1. Check official VTT transcript link first
+    if transcript_url and not force_refresh:
         try:
             r = requests.get(transcript_url, headers=headers, timeout=10)
-            return {"source": "official", "vtt": r.text}
+            if r.status_code == 200 and "WEBVTT" in r.text.upper():
+                return {"source": "official", "vtt": r.text}
         except Exception:
             pass
 
-    safe_title = re.sub(r'[\\/*?:"<>|]', "", title).strip() or "episode"
-    vtt_path = os.path.join(CACHE_DIR, f"{safe_title}.vtt")
-    if os.path.exists(vtt_path):
-        with open(vtt_path, "r", encoding="utf-8") as f:
-            return {"source": "local_cache", "vtt": f.read()}
+    # 2. Use MD5 hash of audio_url as unique cache key (prevents title collisions and file encoding bugs)
+    url_hash = hashlib.md5(audio_url.encode("utf-8")).hexdigest()
+    vtt_path = os.path.join(CACHE_DIR, f"{url_hash}.vtt")
 
+    if os.path.exists(vtt_path) and not force_refresh:
+        with open(vtt_path, "r", encoding="utf-8") as f:
+            content = f.read()
+            if content.strip():
+                return {"source": "local_cache", "vtt": content}
+
+    tmp_path = os.path.join(CACHE_DIR, f"{url_hash}_temp.mp3")
     try:
-        tmp_path = os.path.join(CACHE_DIR, f"{safe_title}_temp.mp3")
-        with requests.get(audio_url, headers=headers, stream=True, timeout=30) as r:
+        # 3. Stream download audio file (up to 12MB ~ 10 mins of speech)
+        with requests.get(audio_url, headers=headers, stream=True, allow_redirects=True, timeout=30) as r:
             r.raise_for_status()
             with open(tmp_path, "wb") as f:
                 downloaded = 0
-                # Download up to 15MB (~10-15 mins of speech, downloads in ~1s)
-                for chunk in r.iter_content(chunk_size=512 * 1024):
+                for chunk in r.iter_content(chunk_size=256 * 1024):
                     f.write(chunk)
                     downloaded += len(chunk)
-                    if downloaded > 15 * 1024 * 1024:
+                    if downloaded > 12 * 1024 * 1024:
                         break
 
+        # Validate downloaded audio file size
+        if not os.path.exists(tmp_path) or os.path.getsize(tmp_path) < 50 * 1024:
+            raise HTTPException(status_code=400, detail="Downloaded audio file is invalid or too small.")
+
+        # 4. Transcribe using faster-whisper (base.en model)
         model = get_whisper_model()
-        # Enforce English language, beam_size=1 for 5x speedup on CPU
         segments, _ = model.transcribe(
             tmp_path,
             language="en",
@@ -205,7 +216,6 @@ def get_or_generate_transcript(audio_url: str, title: str, transcript_url: str =
             s = format_timestamp_vtt(seg.start)
             e = format_timestamp_vtt(seg.end)
             text = seg.text.strip()
-            # Filter empty lines and consecutive duplicate hallucinations
             if text and text != prev_text:
                 vtt_lines.append(f"{s} --> {e}\n{text}\n")
                 prev_text = text
@@ -214,12 +224,16 @@ def get_or_generate_transcript(audio_url: str, title: str, transcript_url: str =
         with open(vtt_path, "w", encoding="utf-8") as f:
             f.write(vtt_content)
 
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
-
         return {"source": "whisper_ai", "vtt": vtt_content}
     except Exception as e:
         return {"source": "error", "detail": str(e), "vtt": ""}
+    finally:
+        # Always clean up temporary audio file
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
 
 @app.api_route("/api/define", methods=["GET", "POST", "HEAD"])
 def define_word(word: str = Query(..., min_length=1), context: str = ""):
