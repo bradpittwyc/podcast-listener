@@ -3,6 +3,7 @@ __pycache__/
 subtitle_cache/
 downloads/
 venv/
+.venv/
 .env
 *.log
 .DS_Store

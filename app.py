@@ -1,21 +1,22 @@
 import os
 import re
 import json
-import hashlib
 import urllib.parse
 import xml.etree.ElementTree as ET
 import requests
-import socket
 from fastapi import FastAPI, Query, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from google import genai as genai_sdk
+from dotenv import load_dotenv
+from transcription import transcript_events, stream_with_heartbeat, to_vtt
+
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 gemini_client = genai_sdk.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
-import faster_whisper
 
 app = FastAPI(title="Podcast Listener — RSS Stream & AI Subtitle Tool")
 
@@ -34,17 +35,6 @@ STATIC_DIR = os.path.join(BASE_DIR, "static")
 os.makedirs(STATIC_DIR, exist_ok=True)
 
 app.mount("/cache", StaticFiles(directory=CACHE_DIR), name="cache")
-
-whisper_model = None
-
-def get_whisper_model():
-    global whisper_model
-    if whisper_model is None:
-        print("Loading Whisper AI model (base.en)...")
-        # Use base.en for ultra-fast English podcast transcription (2-3 seconds on CPU)
-        whisper_model = faster_whisper.WhisperModel("base.en", device="cpu", compute_type="int8", cpu_threads=4)
-        print("Whisper AI (base.en) ready.")
-    return whisper_model
 
 def upgrade_to_hd_image(img_url: str) -> str:
     if not img_url:
@@ -149,225 +139,37 @@ def parse_rss_feed(feed_url: str):
         "episodes": episodes
     }
 
-def format_timestamp_vtt(seconds: float) -> str:
-    hrs = int(seconds // 3600)
-    mins = int((seconds % 3600) // 60)
-    secs = seconds % 60
-    return f"{hrs:02d}:{mins:02d}:{secs:06.3f}"
-
 def get_local_proxy():
-    common_ports = [7890, 10809, 1080, 7891, 10808]
-    for port in common_ports:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(0.1)
-            if s.connect_ex(('127.0.0.1', port)) == 0:
-                return {"http": f"http://127.0.0.1:{port}", "https": f"http://127.0.0.1:{port}"}
-    return None
+    # Use an explicitly configured HTTP proxy; never guess the protocol of open ports.
+    proxy = os.environ.get("PODCAST_PROXY", "").strip()
+    return {"http": proxy, "https": proxy} if proxy else None
+
 
 @app.get("/api/transcribe")
 def get_or_generate_transcript(audio_url: str, title: str = "", transcript_url: str = "", force_refresh: bool = False):
-    """
-    Returns VTT subtitle content with strict URL-to-subtitle mapping using MD5 hash.
-    Priority: (1) official VTT from RSS, (2) MD5-hashed local cache, (3) Whisper AI generation.
-    """
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    }
-    proxies = get_local_proxy()
+    cues = []
+    local_audio = None
+    for event in transcript_events(audio_url, transcript_url, force_refresh, CACHE_DIR, get_local_proxy()):
+        status = event["status"]
+        if status in ("official", "cached"):
+            return {"source": status, "vtt": event["vtt"], **({"local_audio": event["local_audio"]} if "local_audio" in event else {})}
+        if status == "audio_ready":
+            local_audio = event["local_audio"]
+        elif status == "cue":
+            cues.append(event["cue"])
+        elif status == "error":
+            return {"source": "error", "detail": event["detail"], "vtt": ""}
+    return {"source": "groq_api", "vtt": to_vtt(cues), "local_audio": local_audio}
 
-    # 1. Check official VTT transcript link first
-    if transcript_url and not force_refresh:
-        try:
-            r = requests.get(transcript_url, headers=headers, timeout=10, proxies=proxies)
-            if r.status_code == 200 and "WEBVTT" in r.text.upper():
-                return {"source": "official", "vtt": r.text}
-        except Exception:
-            pass
-
-    # 2. Use MD5 hash of audio_url as unique cache key
-    url_hash = hashlib.md5(audio_url.encode("utf-8")).hexdigest()
-    vtt_path = os.path.join(CACHE_DIR, f"{url_hash}.vtt")
-    mp3_path = os.path.join(CACHE_DIR, f"{url_hash}.mp3")
-    local_audio = f"/cache/{url_hash}.mp3"
-
-    if os.path.exists(vtt_path) and os.path.exists(mp3_path) and not force_refresh:
-        with open(vtt_path, "r", encoding="utf-8") as f:
-            content = f.read()
-            if content.strip():
-                return {"source": "local_cache", "vtt": content, "local_audio": local_audio}
-
-    try:
-        # 3. 完整下载音频（利用代理满速），确保前端能播放完整的一集，不再截断播放！
-        if not os.path.exists(mp3_path) or force_refresh:
-            with requests.get(audio_url, headers=headers, stream=True, allow_redirects=True, timeout=30, proxies=proxies) as r:
-                r.raise_for_status()
-                with open(mp3_path, "wb") as f:
-                    for chunk in r.iter_content(chunk_size=512 * 1024):
-                        f.write(chunk)
-
-            if not os.path.exists(mp3_path) or os.path.getsize(mp3_path) < 50 * 1024:
-                raise HTTPException(status_code=400, detail="Downloaded audio file is invalid or too small.")
-
-        # 4. 调用本地 Whisper AI 生成字幕 (由于没有系统级全局代理，Groq 会被 GFW 阻断导致 60 秒超时)
-        model = get_whisper_model()
-        segments, _ = model.transcribe(
-            mp3_path,
-            language="en",
-            beam_size=1,
-            best_of=1,
-            vad_filter=True,
-            vad_parameters=dict(min_silence_duration_ms=500),
-            initial_prompt="This is an English podcast episode transcript."
-        )
-
-        vtt_lines = ["WEBVTT", ""]
-        prev_text = ""
-        for seg in segments:
-            s = format_timestamp_vtt(seg.start)
-            e = format_timestamp_vtt(seg.end)
-            text = seg.text.strip()
-            if text and text != prev_text:
-                vtt_lines.append(f"{s} --> {e}\n{text}\n")
-                prev_text = text
-
-        vtt_content = "\n".join(vtt_lines)
-
-        with open(vtt_path, "w", encoding="utf-8") as f:
-            f.write(vtt_content)
-
-        return {"source": "groq_api", "vtt": vtt_content, "local_audio": local_audio}
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return {"source": "error", "detail": str(e), "vtt": ""}
-
-from fastapi.responses import StreamingResponse
-import json
 
 @app.get("/api/transcribe_stream")
 def transcribe_stream(audio_url: str, title: str = "", transcript_url: str = "", force_refresh: bool = False):
-    def event_generator():
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        proxies = get_local_proxy()
-        
-        # 1. 尝试获取官方字幕
-        if transcript_url and not force_refresh:
-            try:
-                r = requests.get(transcript_url, headers=headers, timeout=10, proxies=proxies)
-                if r.status_code == 200 and "WEBVTT" in r.text.upper():
-                    yield f"data: {json.dumps({'status': 'official', 'vtt': r.text})}\n\n"
-                    return
-            except:
-                pass
-                
-        url_hash = hashlib.md5(audio_url.encode("utf-8")).hexdigest()
-        mp3_path = os.path.join(CACHE_DIR, f"{url_hash}.mp3")
-        local_audio = f"/cache/{url_hash}.mp3"
-        vtt_path = os.path.join(CACHE_DIR, f"{url_hash}.vtt")
-        
-        if os.path.exists(vtt_path) and os.path.exists(mp3_path) and not force_refresh:
-            with open(vtt_path, "r", encoding="utf-8") as f:
-                content = f.read()
-                yield f"data: {json.dumps({'status': 'cached', 'vtt': content, 'local_audio': local_audio})}\n\n"
-                return
-                
-        # 3. 极速下载完整音频
-        if not os.path.exists(mp3_path) or force_refresh:
-            try:
-                with requests.get(audio_url, headers=headers, stream=True, allow_redirects=True, timeout=30, proxies=proxies) as r:
-                    r.raise_for_status()
-                    with open(mp3_path, "wb") as f:
-                        for chunk in r.iter_content(chunk_size=512 * 1024):
-                            f.write(chunk)
-            except Exception as e:
-                yield f"data: {json.dumps({'status': 'error', 'detail': f'Download failed: {str(e)}'})}\n\n"
-                return
+    proxies = get_local_proxy()
+    def events(stopped):
+        return transcript_events(audio_url, transcript_url, force_refresh, CACHE_DIR, proxies, stopped)
+    return StreamingResponse(stream_with_heartbeat(events), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
-        # 告诉前端音频已就绪，可以立刻开始播放！
-        yield f"data: {json.dumps({'status': 'audio_ready', 'local_audio': local_audio})}\n\n"
-
-        # 4. 利用 ffmpeg 对音频进行 5 分钟无损切片，解决 25MB 上传限制和 GFW 上传缓慢导致的 60s 超时问题
-        chunk_prefix = os.path.join(CACHE_DIR, f"{url_hash}_chunk_")
-        # 清理旧切片
-        import glob, subprocess
-        for old_chunk in glob.glob(f"{chunk_prefix}*.mp3"):
-            os.remove(old_chunk)
-            
-        subprocess.run([
-            "ffmpeg", "-y", "-i", mp3_path, 
-            "-f", "segment", "-segment_time", "300", 
-            "-c", "copy", f"{chunk_prefix}%03d.mp3"
-        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        
-        chunks = sorted(glob.glob(f"{chunk_prefix}*.mp3"))
-        
-        # 5. 逐个切片喂给 Groq API 并利用 SSE 实时流式流出字幕
-        groq_api_key = os.environ.get("GROQ_API_KEY", "")
-        if not groq_api_key:
-            yield f"data: {{'status': 'error', 'detail': 'Missing GROQ_API_KEY environment variable.'}}\n\n"
-            return
-            
-        groq_url = "https://api.groq.com/openai/v1/audio/transcriptions"
-        
-        vtt_lines = ["WEBVTT", ""]
-        
-        try:
-            for i, chunk_file in enumerate(chunks):
-                offset_seconds = i * 300.0  # 每一个切片偏移 5 分钟 (300秒)
-                
-                with open(chunk_file, "rb") as f:
-                    files = {"file": ("audio.mp3", f.read(), "audio/mpeg")}
-                    
-                data = {
-                    "model": "whisper-large-v3-turbo",
-                    "response_format": "verbose_json",
-                    "language": "en"
-                }
-                
-                # 即使上传速度慢，5分钟的切片也足够小，不会触发 60s 超时
-                req = requests.post(
-                    groq_url,
-                    headers={"Authorization": f"Bearer {groq_api_key}"},
-                    files=files,
-                    data=data,
-                    timeout=120,
-                    proxies=proxies
-                )
-                req.raise_for_status()
-                resp_json = req.json()
-                
-                prev_text = ""
-                for seg in resp_json.get("segments", []):
-                    text = seg.get("text", "").strip()
-                    if text and text != prev_text:
-                        # 加上时间偏移量
-                        real_start = seg.get("start", 0) + offset_seconds
-                        real_end = seg.get("end", 0) + offset_seconds
-                        
-                        cue = {
-                            "start": real_start,
-                            "end": real_end,
-                            "text": text
-                        }
-                        yield f"data: {json.dumps({'status': 'cue', 'cue': cue})}\n\n"
-                        
-                        s = format_timestamp_vtt(real_start)
-                        e = format_timestamp_vtt(real_end)
-                        vtt_lines.append(f"{s} --> {e}\n{text}\n")
-                        prev_text = text
-                        
-            # 转写完毕，保存完整 VTT 供下次使用
-            with open(vtt_path, "w", encoding="utf-8") as f:
-                f.write("\n".join(vtt_lines))
-                
-            yield f"data: {json.dumps({'status': 'done'})}\n\n"
-            
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            yield f"data: {json.dumps({'status': 'error', 'detail': str(e)})}\n\n"
-
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 @app.api_route("/api/define", methods=["GET", "POST", "HEAD"])
 def define_word(word: str = Query(..., min_length=1), context: str = ""):
@@ -394,11 +196,12 @@ def define_word(word: str = Query(..., min_length=1), context: str = ""):
         return {"status": "error", "message": "GEMINI_API_KEY environment variable not configured"}
 
     try:
-        response = gemini_client.interactions.create(
-            model="gemini-3.5-flash-lite",
-            input=prompt
+        response = gemini_client.models.generate_content(
+            model=os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"),
+            contents=prompt,
+            config={"response_mime_type": "application/json"},
         )
-        text = response.output_text.strip()
+        text = (response.text or "").strip()
         # Clean markdown formatting if present
         if text.startswith("```"):
             text = re.sub(r'^```[a-z]*\n', '', text)
@@ -532,5 +335,7 @@ def index_page():
     return "<h1>Loading...</h1>"
 
 if __name__ == "__main__":
-    print("Podcast Learner starting at http://0.0.0.0:8557")
-    uvicorn.run(app, host="0.0.0.0", port=8557)
+    host = os.environ.get("HOST", "127.0.0.1")
+    port = int(os.environ.get("PORT", "8557"))
+    print(f"Podcast Learner starting at http://{host}:{port}")
+    uvicorn.run(app, host=host, port=port)

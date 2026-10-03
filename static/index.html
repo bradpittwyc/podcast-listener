@@ -537,6 +537,12 @@ let nowPlaying = null;       // { url, title, author, cover, transcriptUrl, desc
 let cues = [];               // { start, end, text }[]
 let activeCue = -1;
 let isTranscribing = false;
+let subtitleStream = null;
+let subtitleRequest = 0;
+let coveredUntil = 0;
+let subtitlesComplete = false;
+let wantsPlayback = false;
+let waitingForSubtitles = false;
 let savedCues = new Set();   // indices saved for this episode
 let notebook = [];           // persisted
 let sidebarOpen = true;
@@ -706,6 +712,14 @@ function playByIdx(idx, cover, author) {
 }
 
 function startPlay(url, title, author, cover, transcriptUrl, description) {
+    if (subtitleStream) subtitleStream.close();
+    subtitleStream = null;
+    subtitleRequest++;
+    isTranscribing = false;
+    coveredUntil = 0;
+    subtitlesComplete = false;
+    wantsPlayback = true;
+    waitingForSubtitles = true;
     nowPlaying = { url, title, author, cover, transcriptUrl, description };
     savedCues = new Set();
 
@@ -723,7 +737,8 @@ function startPlay(url, title, author, cover, transcriptUrl, description) {
     // Reset A-B
     clearLoop();
 
-    if (audio.src !== url) audio.src = url;
+    audio.pause();
+    audio.src = url;
     audio.playbackRate = speed;
     
     // 限制：如果没有读出字幕，就不要开始播放，保持暂停状态
@@ -733,13 +748,43 @@ function startPlay(url, title, author, cover, transcriptUrl, description) {
     loadSubtitles(url, title, transcriptUrl, description);
 }
 
-function togglePlay() {
-    if (isTranscribing || (!cues || !cues.length)) {
-        toast('⏳ 字幕正在转写中，就绪后将自动开启播放', 'info');
+function canPlayWithSubtitles() {
+    return cues.length > 0 && (subtitlesComplete || audio.currentTime < coveredUntil);
+}
+
+async function playWhenReady() {
+    if (!wantsPlayback || !nowPlaying) return;
+    if (!canPlayWithSubtitles()) {
+        waitingForSubtitles = true;
+        audio.pause();
         return;
     }
-    if (audio.paused) { audio.play(); setPlayIcon(true); }
-    else { audio.pause(); setPlayIcon(false); }
+    waitingForSubtitles = false;
+    audio.playbackRate = speed;
+    if (!audio.paused) return;
+    const request = subtitleRequest;
+    try {
+        await audio.play();
+    } catch (e) {
+        if (request !== subtitleRequest || e.name === 'AbortError') return;
+        wantsPlayback = false;
+        setPlayIcon(false);
+        toast('字幕已就绪，请点击播放按钮开始收听。', 'info');
+    }
+}
+
+function togglePlay() {
+    if (!nowPlaying) return;
+    if (!audio.paused || (waitingForSubtitles && wantsPlayback)) {
+        wantsPlayback = false;
+        waitingForSubtitles = false;
+        audio.pause();
+        setPlayIcon(false);
+    } else {
+        wantsPlayback = true;
+        playWhenReady();
+        if (!canPlayWithSubtitles()) toast('等待当前位置的字幕，就绪后继续播放。', 'info');
+    }
 }
 
 function setPlayIcon(playing) {
@@ -762,6 +807,11 @@ audio.ontimeupdate = () => {
     document.getElementById('pbCur').textContent = ft(audio.currentTime);
     document.getElementById('pbTot').textContent = ft(audio.duration);
     syncSubs(audio.currentTime);
+    if (wantsPlayback && !subtitlesComplete && audio.currentTime >= coveredUntil) {
+        waitingForSubtitles = true;
+        audio.pause();
+        setBadge(isTranscribing ? '等待后续字幕…' : '字幕未完成，请刷新重试', 'rgba(245,158,11,.15)', '#fbbf24', 'rgba(245,158,11,.3)');
+    }
 
     // A-B loop enforcement
     if (loopOn && loopA !== null && loopB !== null && audio.currentTime >= loopB) {
@@ -805,6 +855,7 @@ function setLoopB() {
 
 function toggleLoop() {
     if (loopA === null || loopB === null) { toast('Set A and B first', 'info'); return; }
+    if (loopB <= loopA) { toast('B 必须在 A 之后。', 'info'); return; }
     loopOn = !loopOn;
     const btn = document.getElementById('btnLoop');
     if (loopOn) {
@@ -833,142 +884,97 @@ function clearLoop() {
 // ══════════════════════════════════════════════
 //  SUBTITLES
 // ══════════════════════════════════════════════
-async function loadSubtitles(audioUrl, title, transcriptUrl, description) {
-    cues = [];
-    activeCue = -1;
-
-    // Display clean loading indicator — no fake placeholder subtitles
-    const el = document.getElementById('subScroll');
-    el.innerHTML = `
-        <div style="text-align:center;padding:50px 20px;color:var(--text2)">
-            <div class="spinner" style="margin:0 auto 16px auto;"></div>
-            <div style="font-size:14px;font-weight:600;margin-bottom:6px;">🤖 AI 字幕转写中...</div>
-            <div style="font-size:12px;color:var(--text3);">字幕读出前暂停播放，转写完成后将自动开始</div>
-        </div>
-    `;
-    setBadge('🤖 AI 转写中 (暂停播放)...', 'rgba(59,130,246,.15)', '#93c5fd', 'rgba(59,130,246,.3)');
-
-    // Step 1: official VTT transcript
-    if (transcriptUrl) {
-        try {
-            toast('Fetching official transcript...', 'info');
-            const res = await fetch(`/api/transcribe?audio_url=${enc(audioUrl)}&title=${enc(title)}&transcript_url=${enc(transcriptUrl)}`);
-            const data = await res.json();
-            if (data.vtt && data.vtt.trim().length > 10) {
-                const parsed = parseVtt(data.vtt);
-                if (parsed.length > 0) {
-                    cues = parsed;
-                    setBadge('✅ Official Transcript', 'rgba(245,158,11,.15)', '#fbbf24', 'rgba(245,158,11,.3)');
-                    renderSubs();
-                    
-                    if (data.local_audio) {
-                        const curTime = audio.currentTime;
-                        audio.src = data.local_audio;
-                        audio.currentTime = curTime;
-                    }
-                    audio.play();
-                    setPlayIcon(true);
-                    toast('Official transcript loaded — playing.', 'success');
-                    return;
-                }
-            }
-        } catch(e) { console.log('VTT fetch:', e); }
-    }
-
-    // Step 2: Whisper AI transcription
+function loadSubtitles() {
     triggerAiTranscribe(true);
 }
 
-async function triggerAiTranscribe(auto = false) {
-    if (!nowPlaying || isTranscribing) return;
+function triggerAiTranscribe(auto = false) {
+    if (!nowPlaying) return;
+    if (subtitleStream) subtitleStream.close();
+    const request = ++subtitleRequest;
+    const episode = nowPlaying;
     isTranscribing = true;
+    coveredUntil = 0;
+    subtitlesComplete = false;
+    cues = [];
+    activeCue = -1;
+    waitingForSubtitles = wantsPlayback;
+    audio.pause();
     const btn = document.getElementById('refreshBtn');
     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Transcribing...';
-    setBadge('🤖 AI 转写中...', 'rgba(59,130,246,.15)', '#93c5fd', 'rgba(59,130,246,.3)');
-    if (!auto) toast('Whisper AI is transcribing...', 'info');
+    document.getElementById('subScroll').innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3)">正在生成首段字幕，就绪后开始播放。</div>';
+    setBadge('等待首段字幕…', 'rgba(59,130,246,.15)', '#93c5fd', 'rgba(59,130,246,.3)');
 
-    try {
-        const url = `/api/transcribe_stream?audio_url=${enc(nowPlaying.url)}&title=${enc(nowPlaying.title)}&transcript_url=`;
-        const evtSource = new EventSource(url);
-        
-        evtSource.onmessage = (e) => {
-            const data = JSON.parse(e.data);
-            
-            if (data.status === 'official' || data.status === 'cached') {
-                const parsed = parseVtt(data.vtt);
-                if (parsed.length > 0) {
-                    cues = parsed;
-                    setBadge('🤖 AI Subtitles Ready', 'rgba(168,85,247,.15)', '#c084fc', 'rgba(168,85,247,.3)');
-                    renderSubs();
-                    if (data.local_audio) { audio.src = data.local_audio; }
-                    audio.play();
-                    setPlayIcon(true);
-                    toast('✅ 字幕已就绪，自动开始播放', 'success');
-                }
-                evtSource.close();
-                isTranscribing = false;
-                btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Refresh';
-            }
-            else if (data.status === 'audio_ready') {
-                // 音频已经下载完毕，立刻开始播放！此时字幕还在实时生成中
-                audio.src = data.local_audio;
-                audio.play();
-                setPlayIcon(true);
-                cues = [];
-                document.getElementById('subScroll').innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3);font-size:13px;line-height:2"><i class="fa-solid fa-spinner fa-spin"></i><br/>AI 模型正在进行静音检测与预热<br/>（通常需要 5~15 秒）<br/>请边听边等待，第一句字幕马上就来...</div>';
-                toast('▶️ 音频就绪，AI 预热中...', 'success');
-                setBadge('⚡ AI Warming Up...', 'rgba(168,85,247,.15)', '#c084fc', 'rgba(168,85,247,.3)');
-            }
-            else if (data.status === 'cue') {
-                if (cues.length === 0) {
-                    setBadge('⚡ Real-time Transcribing', 'rgba(168,85,247,.15)', '#c084fc', 'rgba(168,85,247,.3)');
-                    toast('字幕流已开启！', 'success');
-                }
-                cues.push({
-                    start: data.cue.start,
-                    end: data.cue.end,
-                    text: data.cue.text
-                });
-                renderSubs();
-            }
-            else if (data.status === 'done') {
-                toast('✅ 实时转写完成！', 'success');
-                setBadge('🤖 AI Subtitles Ready', 'rgba(168,85,247,.15)', '#c084fc', 'rgba(168,85,247,.3)');
-                evtSource.close();
-                isTranscribing = false;
-                btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Refresh';
-            }
-            else if (data.status === 'error') {
-                toast('转写错误: ' + data.detail, 'info');
-                document.getElementById('subScroll').innerHTML = `<div style="text-align:center;padding:40px;color:var(--text3);font-size:13px">转写终止: ${data.detail}</div>`;
-                evtSource.close();
-                isTranscribing = false;
-                btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Refresh';
-            }
-        };
-
-        evtSource.onerror = (err) => {
-            evtSource.close();
-            isTranscribing = false;
-            btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Refresh';
-            if (cues.length === 0) {
-                audio.src = nowPlaying.url;
-                audio.play();
-                setPlayIcon(true);
-                document.getElementById('subScroll').innerHTML = `<div style="text-align:center;padding:40px;color:var(--text3);font-size:13px">SSE 连接中断，已自动播放原声音频。</div>`;
-            }
-        };
-
-    } catch(e) {
+    const finish = () => {
+        if (request !== subtitleRequest) return;
+        if (subtitleStream) subtitleStream.close();
+        subtitleStream = null;
         isTranscribing = false;
         btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Refresh';
-        if (cues.length === 0) {
-            audio.src = nowPlaying.url;
-            audio.play();
-            setPlayIcon(true);
+    };
+    const fail = (detail) => {
+        if (request !== subtitleRequest) return;
+        finish();
+        setBadge('字幕转写失败', 'rgba(245,158,11,.15)', '#fbbf24', 'rgba(245,158,11,.3)');
+        toast(detail, 'info');
+        if (!cues.length) {
+            document.getElementById('subScroll').textContent = detail;
+            audio.pause();
         }
-        document.getElementById('subScroll').innerHTML = `<div style="text-align:center;padding:40px;color:var(--text3);font-size:13px">转写失败: ${e.message}。已自动为您播放原声音频。</div>`;
-        toast('Transcription error: ' + e.message, 'info');
+    };
+    try {
+        const url = `/api/transcribe_stream?audio_url=${enc(episode.url)}&title=${enc(episode.title)}&transcript_url=${enc(episode.transcriptUrl)}&force_refresh=${!auto}`;
+        const stream = new EventSource(url);
+        subtitleStream = stream;
+        stream.onmessage = (e) => {
+            if (request !== subtitleRequest || stream !== subtitleStream) return;
+            let data;
+            try { data = JSON.parse(e.data); }
+            catch { fail('字幕响应格式异常，请刷新重试。'); return; }
+            if (data.status === 'official' || data.status === 'cached') {
+                cues = parseVtt(data.vtt);
+                if (!cues.length) { fail('字幕缓存为空，请点击刷新重新生成。'); return; }
+                subtitlesComplete = true;
+                coveredUntil = Infinity;
+                if (data.local_audio && audio.currentTime === 0) audio.src = data.local_audio;
+                renderSubs();
+                setBadge(data.status === 'official' ? '✅ Official Transcript' : '✅ Groq Subtitles Ready', 'rgba(168,85,247,.15)', '#c084fc', 'rgba(168,85,247,.3)');
+                finish();
+                playWhenReady();
+            } else if (data.status === 'audio_ready') {
+                // Select the downloaded audio only before playback; never reset a playing source.
+                if (data.local_audio && audio.currentTime === 0 && audio.paused) audio.src = data.local_audio;
+                audio.playbackRate = speed;
+            } else if (data.status === 'progress') {
+                setBadge(data.detail, 'rgba(168,85,247,.15)', '#c084fc', 'rgba(168,85,247,.3)');
+            } else if (data.status === 'cue') {
+                const cue = data.cue;
+                if (cue && Number.isFinite(cue.start) && Number.isFinite(cue.end) && cue.end > cue.start && typeof cue.text === 'string') cues.push(cue);
+            } else if (data.status === 'chunk_ready') {
+                if (!Number.isFinite(data.until)) { fail('字幕进度无效，请刷新重试。'); return; }
+                coveredUntil = Math.max(coveredUntil, data.until);
+                if (cues.length) {
+                    renderSubs();
+                    activeCue = -1;
+                    syncSubs(audio.currentTime);
+                    playWhenReady();
+                }
+            } else if (data.status === 'done') {
+                if (!cues.length) { fail('没有识别到字幕，请刷新重试。'); return; }
+                subtitlesComplete = true;
+                coveredUntil = Infinity;
+                finish();
+                setBadge('✅ Groq Subtitles Ready', 'rgba(168,85,247,.15)', '#c084fc', 'rgba(168,85,247,.3)');
+                playWhenReady();
+            } else if (data.status === 'error') {
+                fail(data.detail || '字幕转写失败，请刷新重试。');
+            }
+        };
+        stream.onerror = () => {
+            if (request === subtitleRequest && stream === subtitleStream) fail('字幕连接中断，请刷新重试。');
+        };
+    } catch (e) {
+        fail('无法启动字幕转写，请刷新重试。');
     }
 }
 
@@ -987,6 +993,7 @@ function renderSubs() {
         return;
     }
     let h = '';
+    savedCues = new Set(cues.flatMap((c, i) => notebook.some(n => n.epUrl === nowPlaying.url && Math.abs(n.start - c.start) < 0.5) ? [i] : []));
     cues.forEach((c, i) => {
         const saved = savedCues.has(i);
         h += `<div class="sub-line" id="cue-${i}" onclick="jumpTo(${c.start})">
@@ -1006,13 +1013,14 @@ function wordSpans(text, cueIdx) {
         if (/^\s+$/.test(tok)) return tok;
         const word = tok.replace(/[^a-zA-Z'']/g, '');
         if (!word || word.length < 2) return `<span>${escHtml(tok)}</span>`;
-        return `<span class="word" onclick="lookupWord('${word.toLowerCase()}',event)">${escHtml(tok)}</span>`;
+        return `<span class="word" onclick="lookupWord('${escQ(word.toLowerCase())}',event,${cueIdx})">${escHtml(tok)}</span>`;
     }).join('');
 }
 
 function jumpTo(secs) {
     audio.currentTime = secs;
-    if (audio.paused) audio.play();
+    wantsPlayback = true;
+    playWhenReady();
 }
 
 function syncSubs(t) {
@@ -1045,12 +1053,12 @@ function parseVtt(text) {
         const parts = lines[ti].split('-->');
         if (parts.length < 2) continue;
         const start = ts(parts[0].trim());
-        const end   = ts(parts[1].split(' ')[0].trim());
+        const end   = ts(parts[1].trim().split(/\s+/)[0]);
         const txt   = lines.slice(ti+1)
             .map(l => l.replace(/<[^>]+>/g,'').trim())
             .filter(l => l && !l.startsWith('WEBVTT') && !l.startsWith('NOTE'))
             .join(' ').trim();
-        if (txt) result.push({ start, end, text: txt });
+        if (txt && Number.isFinite(start) && Number.isFinite(end) && end > start) result.push({ start, end, text: txt });
     }
     return result;
 }
@@ -1101,7 +1109,7 @@ function positionDictPopup(targetRect) {
     popup.style.top = top + 'px';
 }
 
-async function lookupWord(word, e) {
+async function lookupWord(word, e, cueIdx) {
     e.stopPropagation();
     const popup = document.getElementById('dictPopup');
     const content = document.getElementById('dictContent');
@@ -1116,9 +1124,7 @@ async function lookupWord(word, e) {
 
     // Get current sentence context if available
     let contextSentence = "";
-    if (activeCue >= 0 && cues[activeCue]) {
-        contextSentence = cues[activeCue].text || "";
-    }
+    if (cues[cueIdx]) contextSentence = cues[cueIdx].text || "";
 
     const renderAndUpdatePos = (html) => {
         content.innerHTML = html;
@@ -1282,7 +1288,8 @@ function renderNotebook() {
 function jumpFromNotebook(epUrl, startTime) {
     if (nowPlaying && nowPlaying.url === epUrl) {
         audio.currentTime = startTime;
-        if (audio.paused) audio.play();
+        wantsPlayback = true;
+        playWhenReady();
         showTab('plaza');
         toast(`↩ Jumped to ${ft(startTime)}`, 'info');
     } else {
