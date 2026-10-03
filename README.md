@@ -30,7 +30,9 @@ python -m venv .venv
 Copy-Item .env.example .env
 ```
 
-编辑 `.env`：设置 `GROQ_API_KEY`；如需 AI 中英查词，再设置 `GEMINI_API_KEY`。不要提交密钥，`.env` 已在 Git 忽略列表中。环境变量优先于 `.env`。
+编辑 `.env`：设置 `GROQ_API_KEY`（也支持用逗号分隔多把 Key，例如 `key1,key2`）；如需双 Key 并行转写，再设置 `GROQ_API_KEY_2`。第一把 Key 也可以使用变量名 `GROQ_API_KEY_1`，它优先于旧变量。两把不同的 Key 按切片交替使用：1、2、1、2；第一片还在转写时，第二片可以开始转写。每把 Key 同时最多处理一片，字幕结果按节目顺序返回，后片不会越过前片。只配置一把 Key 时串行转写；相同的两把 Key 合并为一个通道。同一切片重试仍使用原 Key。
+
+如需 AI 中英查词，再设置 `GEMINI_API_KEY`。不要提交密钥，`.env` 已在 Git 忽略列表中。环境变量优先于 `.env`。修改 Key 后重启服务。
 
 ```powershell
 .\.venv\Scripts\python.exe app.py

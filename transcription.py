@@ -9,7 +9,9 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
 import wave
+from concurrent.futures import Future, TimeoutError as FutureTimeout
 from pathlib import Path
 
 import requests
@@ -88,7 +90,7 @@ def local_audio_chunks(audio_path, work_dir, stopped):
     offset = 0.0
     while not stopped.is_set():
         length = chunk_seconds(offset)
-        chunk = Path(work_dir) / "chunk.wav"
+        chunk = Path(work_dir) / f"chunk-{round(offset * 16000)}.wav"
         command = ["ffmpeg", "-nostdin", "-y", "-ss", f"{offset:.6f}", "-i", str(audio_path),
                    "-t", str(length), "-map", "0:a:0", "-vn", "-ar", "16000", "-ac", "1",
                    "-c:a", "pcm_s16le", str(chunk)]
@@ -239,11 +241,12 @@ def groq_segments(chunk_path, api_key, proxies, stopped):
     for attempt in range(3):
         if stopped.is_set():
             return None
-        with chunk_path.open("rb") as f:
-            response = requests.post(
+        # Release the Windows file handle before waiting for the API response.
+        payload = chunk_path.read_bytes()
+        response = requests.post(
                 "https://api.groq.com/openai/v1/audio/transcriptions",
                 headers={"Authorization": f"Bearer {api_key}"},
-                files={"file": (chunk_path.name, f, "audio/wav")},
+                files={"file": (chunk_path.name, payload, "audio/wav")},
                 data={"model": "whisper-large-v3-turbo", "response_format": "verbose_json",
                       "timestamp_granularities[]": "segment"},
                 timeout=(15, 120), proxies=proxies,
@@ -272,6 +275,130 @@ def groq_segments(chunk_path, api_key, proxies, stopped):
         return segments
 
 
+def groq_api_keys():
+    first = os.environ.get("GROQ_API_KEY_1", "").strip() or os.environ.get("GROQ_API_KEY", "").strip()
+    second = os.environ.get("GROQ_API_KEY_2", "").strip()
+    values = [key.strip() for group in (first, second) for key in group.split(",") if key.strip()]
+    return list(dict.fromkeys(values))
+
+
+def alternating_transcriptions(chunks, api_keys, proxies, stopped):
+    """One worker per key, bounded lookahead, and results in episode order."""
+    cancel = threading.Event()
+    capacity = threading.Semaphore(len(api_keys))
+    messages = queue.Queue(maxsize=16)
+    jobs = [queue.Queue() for _ in api_keys]
+
+    class Signal:
+        def is_set(self):
+            return stopped.is_set() or cancel.is_set()
+
+        def wait(self, seconds):
+            deadline = time.monotonic() + seconds
+            while not self.is_set():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                cancel.wait(min(remaining, 0.2))
+            return True
+
+    signal = Signal()
+    if callable(chunks):
+        chunks = chunks(signal)
+
+    def send(message):
+        while not signal.is_set():
+            try:
+                messages.put(message, timeout=0.2)
+                return
+            except queue.Full:
+                pass
+
+    def worker(channel):
+        while not signal.is_set():
+            try:
+                item, future = jobs[channel].get(timeout=0.2)
+            except queue.Empty:
+                continue
+            if not future.set_running_or_notify_cancel():
+                continue
+            try:
+                future.set_result(groq_segments(item["path"], api_keys[channel], proxies, signal))
+            except Exception as exc:
+                future.set_exception(exc)
+            finally:
+                item["path"].unlink(missing_ok=True)
+
+    def dispatch():
+        index = 0
+        try:
+            while not signal.is_set():
+                if not capacity.acquire(timeout=0.2):
+                    continue
+                try:
+                    item = next(chunks)
+                except StopIteration:
+                    capacity.release()
+                    break
+                if item["status"] != "chunk":
+                    capacity.release()
+                    send(item)
+                    continue
+                channel = index % len(api_keys)
+                index += 1
+                future = Future()
+                jobs[channel].put((item, future))
+                send({**item, "channel": channel + 1, "future": future})
+        except Exception as exc:
+            send({"status": "failed", "exception": exc})
+        finally:
+            try:
+                chunks.close()
+            except Exception as exc:
+                send({"status": "failed", "exception": exc})
+            finally:
+                send(None)
+
+    for channel in range(len(api_keys)):
+        threading.Thread(target=worker, args=(channel,), daemon=True).start()
+    dispatcher = threading.Thread(target=dispatch, daemon=True)
+    dispatcher.start()
+    try:
+        while not signal.is_set():
+            try:
+                item = messages.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            if item is None:
+                return
+            if item["status"] == "failed":
+                raise item["exception"]
+            if item["status"] != "chunk":
+                yield item
+                continue
+            try:
+                offset, duration = item["offset"], item["duration"]
+                yield {"status": "progress", "detail": f"Groq 通道 {item['channel']} 正在转写 {offset / 60:.1f}–{(offset + duration) / 60:.1f} 分钟"}
+                while not signal.is_set():
+                    try:
+                        segments = item["future"].result(timeout=0.2)
+                        break
+                    except FutureTimeout:
+                        if item["future"].done():
+                            raise
+                        continue
+                else:
+                    return
+                if segments is None:
+                    return
+                yield {"status": "transcribed", "offset": offset, "duration": duration, "segments": segments}
+            finally:
+                capacity.release()
+    finally:
+        cancel.set()
+        dispatcher.join(timeout=25)
+
+
 def transcript_events(audio_url, transcript_url, force_refresh, cache_dir, proxies=None, stopped=None):
     stopped = stopped if stopped is not None else threading.Event()
     key, audio_path, vtt_path = cache_paths(cache_dir, audio_url)
@@ -297,11 +424,9 @@ def transcript_events(audio_url, transcript_url, force_refresh, cache_dir, proxi
                 yield {"status": "cached", "vtt": content, "local_audio": f"/cache/{key}.mp3"}
                 return
 
-        api_key_env = os.environ.get("GROQ_API_KEY", "").strip()
-        if not api_key_env:
+        api_keys = groq_api_keys()
+        if not api_keys:
             raise RuntimeError("未配置 GROQ_API_KEY；请配置密钥后刷新字幕，字幕就绪后播放。")
-        api_keys = [k.strip() for k in api_key_env.split(",") if k.strip()]
-        
         if not shutil.which("ffmpeg"):
             raise RuntimeError("找不到 FFmpeg；请安装并加入 PATH 后重启服务。")
 
@@ -310,31 +435,23 @@ def transcript_events(audio_url, transcript_url, force_refresh, cache_dir, proxi
             if force_refresh or not audio_path.exists() or not audio_path.stat().st_size:
                 yield {"status": "progress", "detail": "正在边下载边切片，首段字幕就绪后播放。"}
                 yield {"status": "audio_source", "audio_url": "/api/audio?url=" + requests.utils.quote(audio_url, safe="")}
-                chunks = remote_audio_chunks(audio_url, audio_path, work_dir, proxies, stopped)
+                chunks = lambda pipeline_stopped: remote_audio_chunks(audio_url, audio_path, work_dir, proxies, pipeline_stopped)
             else:
                 yield {"status": "audio_ready", "local_audio": f"/cache/{key}.mp3"}
-                chunks = local_audio_chunks(audio_path, work_dir, stopped)
+                chunks = lambda pipeline_stopped: local_audio_chunks(audio_path, work_dir, pipeline_stopped)
             cues = []
+            results = alternating_transcriptions(chunks, api_keys, proxies, stopped)
             try:
-                for i, item in enumerate(chunks):
+                for item in results:
                     if stopped.is_set():
                         return
                     if item["status"] == "audio_ready":
                         yield {"status": "audio_ready", "local_audio": f"/cache/{key}.mp3"}
                         continue
-                    if item["status"] != "chunk":
+                    if item["status"] != "transcribed":
                         yield item
                         continue
-                    chunk, offset, duration = item["path"], item["offset"], item["duration"]
-                    yield {"status": "progress", "detail": f"Groq 正在转写 {offset / 60:.1f}–{(offset + duration) / 60:.1f} 分钟"}
-                    
-                    # 轮询使用 API Key
-                    current_key = api_keys[i % len(api_keys)]
-                    
-                    try:
-                        segments = groq_segments(chunk, current_key, proxies, stopped)
-                    finally:
-                        chunk.unlink(missing_ok=True)
+                    offset, duration, segments = item["offset"], item["duration"], item["segments"]
                     if segments is None or stopped.is_set():
                         return
                     for segment in segments:
@@ -350,7 +467,7 @@ def transcript_events(audio_url, transcript_url, force_refresh, cache_dir, proxi
                         yield {"status": "cue", "cue": cue}
                     yield {"status": "chunk_ready", "until": offset + duration}
             finally:
-                chunks.close()
+                results.close()
             if not cues:
                 raise RuntimeError("Groq 未识别到语音，请刷新重试。")
             if stopped.is_set():

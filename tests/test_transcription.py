@@ -18,10 +18,86 @@ import transcription as stt
 
 class TranscriptionTests(unittest.TestCase):
     def setUp(self):
+        keys = patch.dict(os.environ, {"GROQ_API_KEY": "", "GROQ_API_KEY_1": "", "GROQ_API_KEY_2": ""})
+        keys.start()
+        self.addCleanup(keys.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.cache = Path(self.temp.name)
         self.url = "https://example.com/episode.mp3"
+
+    def test_dual_keys_start_second_chunk_before_first_finishes_and_preserve_order(self):
+        first_started, second_finished = threading.Event(), threading.Event()
+        calls, active = {}, {"first-key": 0, "second-key": 0}
+        mutex = threading.Lock()
+
+        def chunks():
+            for index in range(4):
+                path = self.cache / f"chunk-{index}.wav"
+                path.write_text(str(index))
+                yield {"status": "chunk", "path": path, "offset": index * 30, "duration": 30}
+
+        def transcribe(path, key, *args):
+            index = int(path.read_text())
+            with mutex:
+                active[key] += 1
+                self.assertEqual(active[key], 1, "same key has overlapping requests")
+                calls[index] = key
+            try:
+                if index == 0:
+                    first_started.set()
+                    self.assertTrue(second_finished.wait(2), "second chunk waited for first to finish")
+                elif index == 1:
+                    self.assertTrue(first_started.wait(2))
+                    second_finished.set()
+                return [{"start": 0, "end": 30, "text": str(index)}]
+            finally:
+                with mutex:
+                    active[key] -= 1
+
+        with patch.object(stt, "groq_segments", side_effect=transcribe):
+            events = list(stt.alternating_transcriptions(chunks(), ["first-key", "second-key"], None, threading.Event()))
+        self.assertEqual(calls, {0: "first-key", 1: "second-key", 2: "first-key", 3: "second-key"})
+        results = [e for e in events if e["status"] == "transcribed"]
+        self.assertEqual([e["offset"] for e in results], [0, 30, 60, 90])
+        self.assertEqual([e["segments"][0]["text"] for e in results], ["0", "1", "2", "3"])
+
+    def test_key_configuration_supports_legacy_numbered_and_single_key(self):
+        with patch.dict(os.environ, {"GROQ_API_KEY": " legacy ", "GROQ_API_KEY_2": " second "}):
+            self.assertEqual(stt.groq_api_keys(), ["legacy", "second"])
+            with patch.dict(os.environ, {"GROQ_API_KEY_1": "numbered"}):
+                self.assertEqual(stt.groq_api_keys(), ["numbered", "second"])
+            with patch.dict(os.environ, {"GROQ_API_KEY_2": "legacy"}):
+                self.assertEqual(stt.groq_api_keys(), ["legacy"])
+        with patch.dict(os.environ, {"GROQ_API_KEY_2": "only-second"}):
+            self.assertEqual(stt.groq_api_keys(), ["only-second"])
+        with patch.dict(os.environ, {"GROQ_API_KEY": " one, ,two,one ", "GROQ_API_KEY_2": "two"}):
+            self.assertEqual(stt.groq_api_keys(), ["one", "two"])
+
+    def test_single_key_uses_serial_requests(self):
+        def chunks():
+            for index in range(3):
+                path = self.cache / f"single-{index}.wav"
+                path.write_bytes(b"audio")
+                yield {"status": "chunk", "path": path, "offset": index * 30, "duration": 30}
+        with patch.object(stt, "groq_segments", return_value=[]) as groq:
+            events = list(stt.alternating_transcriptions(chunks(), ["single-key"], None, threading.Event()))
+        self.assertEqual([call.args[1] for call in groq.call_args_list], ["single-key"] * 3)
+        self.assertEqual(len([event for event in events if event["status"] == "transcribed"]), 3)
+
+    def test_worker_failure_cancels_waiting_chunk_producer(self):
+        cancelled = threading.Event()
+        def factory(signal):
+            path = self.cache / "failed.wav"
+            path.write_bytes(b"audio")
+            yield {"status": "chunk", "path": path, "offset": 0, "duration": 30}
+            while not signal.wait(0.05):
+                pass
+            cancelled.set()
+        with patch.object(stt, "groq_segments", side_effect=RuntimeError("Groq failed")):
+            with self.assertRaisesRegex(RuntimeError, "Groq failed"):
+                list(stt.alternating_transcriptions(factory, ["key-one", "key-two"], None, threading.Event()))
+        self.assertTrue(cancelled.is_set())
 
     def test_staged_schedule(self):
         offset, sizes = 0, []
