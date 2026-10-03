@@ -271,7 +271,7 @@ def transcribe_stream(audio_url: str, title: str = "", transcript_url: str = "",
                 yield f"data: {json.dumps({'status': 'cached', 'vtt': content, 'local_audio': local_audio})}\n\n"
                 return
                 
-        # 2. 极速下载完整音频
+        # 3. 极速下载完整音频
         if not os.path.exists(mp3_path) or force_refresh:
             try:
                 with requests.get(audio_url, headers=headers, stream=True, allow_redirects=True, timeout=30, proxies=proxies) as r:
@@ -286,36 +286,76 @@ def transcribe_stream(audio_url: str, title: str = "", transcript_url: str = "",
         # 告诉前端音频已就绪，可以立刻开始播放！
         yield f"data: {json.dumps({'status': 'audio_ready', 'local_audio': local_audio})}\n\n"
 
-        # 3. 实时流式转写（本地模型逐句吐出）
-        try:
-            model = get_whisper_model()
-            segments, _ = model.transcribe(
-                mp3_path,
-                language="en",
-                beam_size=1,
-                best_of=1,
-                vad_filter=True,
-                vad_parameters=dict(min_silence_duration_ms=500),
-                initial_prompt="This is an English podcast episode transcript."
-            )
+        # 4. 利用 ffmpeg 对音频进行 5 分钟无损切片，解决 25MB 上传限制和 GFW 上传缓慢导致的 60s 超时问题
+        chunk_prefix = os.path.join(CACHE_DIR, f"{url_hash}_chunk_")
+        # 清理旧切片
+        import glob, subprocess
+        for old_chunk in glob.glob(f"{chunk_prefix}*.mp3"):
+            os.remove(old_chunk)
             
-            vtt_lines = ["WEBVTT", ""]
-            prev_text = ""
-            for seg in segments:
-                text = seg.text.strip()
-                if text and text != prev_text:
-                    cue = {
-                        "start": seg.start,
-                        "end": seg.end,
-                        "text": text
-                    }
-                    yield f"data: {json.dumps({'status': 'cue', 'cue': cue})}\n\n"
+        subprocess.run([
+            "ffmpeg", "-y", "-i", mp3_path, 
+            "-f", "segment", "-segment_time", "300", 
+            "-c", "copy", f"{chunk_prefix}%03d.mp3"
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        chunks = sorted(glob.glob(f"{chunk_prefix}*.mp3"))
+        
+        # 5. 逐个切片喂给 Groq API 并利用 SSE 实时流式流出字幕
+        groq_api_key = os.environ.get("GROQ_API_KEY", "")
+        if not groq_api_key:
+            yield f"data: {{'status': 'error', 'detail': 'Missing GROQ_API_KEY environment variable.'}}\n\n"
+            return
+            
+        groq_url = "https://api.groq.com/openai/v1/audio/transcriptions"
+        
+        vtt_lines = ["WEBVTT", ""]
+        
+        try:
+            for i, chunk_file in enumerate(chunks):
+                offset_seconds = i * 300.0  # 每一个切片偏移 5 分钟 (300秒)
+                
+                with open(chunk_file, "rb") as f:
+                    files = {"file": ("audio.mp3", f.read(), "audio/mpeg")}
                     
-                    s = format_timestamp_vtt(seg.start)
-                    e = format_timestamp_vtt(seg.end)
-                    vtt_lines.append(f"{s} --> {e}\n{text}\n")
-                    prev_text = text
-                    
+                data = {
+                    "model": "whisper-large-v3-turbo",
+                    "response_format": "verbose_json",
+                    "language": "en"
+                }
+                
+                # 即使上传速度慢，5分钟的切片也足够小，不会触发 60s 超时
+                req = requests.post(
+                    groq_url,
+                    headers={"Authorization": f"Bearer {groq_api_key}"},
+                    files=files,
+                    data=data,
+                    timeout=120,
+                    proxies=proxies
+                )
+                req.raise_for_status()
+                resp_json = req.json()
+                
+                prev_text = ""
+                for seg in resp_json.get("segments", []):
+                    text = seg.get("text", "").strip()
+                    if text and text != prev_text:
+                        # 加上时间偏移量
+                        real_start = seg.get("start", 0) + offset_seconds
+                        real_end = seg.get("end", 0) + offset_seconds
+                        
+                        cue = {
+                            "start": real_start,
+                            "end": real_end,
+                            "text": text
+                        }
+                        yield f"data: {json.dumps({'status': 'cue', 'cue': cue})}\n\n"
+                        
+                        s = format_timestamp_vtt(real_start)
+                        e = format_timestamp_vtt(real_end)
+                        vtt_lines.append(f"{s} --> {e}\n{text}\n")
+                        prev_text = text
+                        
             # 转写完毕，保存完整 VTT 供下次使用
             with open(vtt_path, "w", encoding="utf-8") as f:
                 f.write("\n".join(vtt_lines))
