@@ -1349,14 +1349,30 @@ async function loadRssUrl(url) {
     }
 }
 
-function renderChannel(feed, meta = {}) {
+let currentEpPage = 1;
+
+function renderChannel(feed, meta = {}, page = 1) {
     feed = feed || {};
     meta = meta || currentMeta || {};
-    currentFeed = feed;
-    currentEpisodes = feed.episodes || [];
+    
+    // Only update currentEpisodes if it's a new feed
+    if (currentFeed !== feed) {
+        currentFeed = feed;
+        // "正序" (oldest first) -> RSS is usually newest first, so we reverse it.
+        currentEpisodes = [...(feed.episodes || [])].reverse();
+    }
+    
+    currentEpPage = page;
+    const totalEps = currentEpisodes.length;
+    const limit = 30;
+    const totalPages = Math.ceil(totalEps / limit) || 1;
+    const startIdx = (page - 1) * limit;
+    const pageEps = currentEpisodes.slice(startIdx, startIdx + limit);
+
     const cover = hd(feed.image || meta.artworkUrl600 || (currentMeta && currentMeta.artworkUrl600) || '');
     const title = feed.title || meta.collectionName || (currentMeta && currentMeta.collectionName) || '未知播客';
     const author = feed.author || meta.artistName || (currentMeta && currentMeta.artistName) || '';
+    
     let h = `<div class="channel-hd">
         <button class="back-btn" onclick="loadTopCharts('${country}')">
             <i class="fa-solid fa-chevron-left"></i> 返回广场
@@ -1365,17 +1381,18 @@ function renderChannel(feed, meta = {}) {
             <img src="${cover}" alt="">
             <div>
                 <div class="chan-mini-title">${esc(title)}</div>
-                <div class="chan-mini-author">${esc(author)} · ${currentEpisodes.length} 集</div>
+                <div class="chan-mini-author">${esc(author)} · 共 ${totalEps} 集</div>
             </div>
         </div>
     </div><div class="ep-list">`;
 
-    if (!currentEpisodes.length) {
+    if (!pageEps.length) {
         h += `<div style="padding:30px 14px;text-align:center;color:var(--text3);font-size:12px">此播客暂无可解析的单集音频</div>`;
     } else {
-        currentEpisodes.forEach((ep, i) => {
+        pageEps.forEach((ep, i) => {
+            const actualIdx = startIdx + i;
             const isCur = nowPlaying && nowPlaying.url === ep.audioUrl;
-            h += `<div class="ep-item ${isCur ? 'playing' : ''}" onclick="playByIdx(${i}, '${escQ(cover)}', '${escQ(author)}')">
+            h += `<div class="ep-item ${isCur ? 'playing' : ''}" onclick="playByIdx(${actualIdx}, '${escQ(cover)}', '${escQ(author)}')">
                 <div class="ep-icon"><i class="fa-solid ${isCur ? 'fa-volume-high' : 'fa-play'}"></i></div>
                 <div class="ep-info">
                     <div class="ep-title">${esc(ep.title)}</div>
@@ -1383,6 +1400,14 @@ function renderChannel(feed, meta = {}) {
                 </div>
             </div>`;
         });
+
+        if (totalPages > 1) {
+            h += `<div style="display:flex; justify-content:center; align-items:center; gap:16px; padding:16px 0; border-top:1px solid var(--border)">`;
+            if (page > 1) h += `<button class="cbtn" style="width:28px;height:28px;background:var(--card-bg)" onclick="renderChannel(currentFeed, currentMeta, ${page - 1})"><i class="fa-solid fa-chevron-left"></i></button>`;
+            h += `<span style="font-size:11px; color:var(--text3)">${page} / ${totalPages}</span>`;
+            if (page < totalPages) h += `<button class="cbtn" style="width:28px;height:28px;background:var(--card-bg)" onclick="renderChannel(currentFeed, currentMeta, ${page + 1})"><i class="fa-solid fa-chevron-right"></i></button>`;
+            h += `</div>`;
+        }
     }
     h += '</div>';
     setPlaza(h);
