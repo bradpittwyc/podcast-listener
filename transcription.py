@@ -245,7 +245,7 @@ def groq_segments(chunk_path, api_key, proxies, stopped):
                 headers={"Authorization": f"Bearer {api_key}"},
                 files={"file": (chunk_path.name, f, "audio/wav")},
                 data={"model": "whisper-large-v3-turbo", "response_format": "verbose_json",
-                      "language": "en", "timestamp_granularities[]": "segment"},
+                      "timestamp_granularities[]": "segment"},
                 timeout=(15, 120), proxies=proxies,
             )
         if response.status_code == 429 or response.status_code >= 500:
