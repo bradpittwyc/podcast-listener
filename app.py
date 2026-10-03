@@ -197,28 +197,29 @@ def get_or_generate_transcript(audio_url: str, title: str = "", transcript_url: 
                 return {"source": "local_cache", "vtt": content, "local_audio": local_audio}
 
     try:
-        # 3. 极速测试缓冲：只下载前 3MB 音频（约 3 分钟），保证 1 秒内能下完并上传给 Groq
+        # 3. 完整下载音频（利用代理满速），确保前端能播放完整的一集，不再截断播放！
         if not os.path.exists(mp3_path) or force_refresh:
             with requests.get(audio_url, headers=headers, stream=True, allow_redirects=True, timeout=30, proxies=proxies) as r:
                 r.raise_for_status()
-                downloaded = 0
                 with open(mp3_path, "wb") as f:
                     for chunk in r.iter_content(chunk_size=512 * 1024):
                         f.write(chunk)
-                        downloaded += len(chunk)
-                        if downloaded > 3 * 1024 * 1024:
-                            break
 
             if not os.path.exists(mp3_path) or os.path.getsize(mp3_path) < 50 * 1024:
                 raise HTTPException(status_code=400, detail="Downloaded audio file is invalid or too small.")
 
-        # 4. 调用 Groq API 极速生成字幕 (代替本地老牛拉破车的 CPU)
+        # 4. 调用 Groq API 极速生成字幕
+        # 由于 Groq 有 25MB 的文件体积限制，我们只读取前 24MB 发送给它（约产生前 30 分钟的高质量字幕）
         groq_api_key = os.environ.get("GROQ_API_KEY", "")
         groq_url = "https://api.groq.com/openai/v1/audio/transcriptions"
         
+        MAX_GROQ_BYTES = 24 * 1024 * 1024
+        
         with open(mp3_path, "rb") as f:
+            audio_bytes = f.read(MAX_GROQ_BYTES)
+            
             files = {
-                "file": ("audio.mp3", f, "audio/mpeg")
+                "file": ("audio.mp3", audio_bytes, "audio/mpeg")
             }
             data = {
                 "model": "whisper-large-v3-turbo",
