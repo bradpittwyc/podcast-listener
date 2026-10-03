@@ -888,48 +888,77 @@ async function triggerAiTranscribe(auto = false) {
     if (!auto) toast('Whisper AI is transcribing...', 'info');
 
     try {
-        const res = await fetch(`/api/transcribe?audio_url=${enc(nowPlaying.url)}&title=${enc(nowPlaying.title)}&transcript_url=`);
-        const data = await res.json();
-        isTranscribing = false;
-        btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Refresh';
-        if (data.vtt && data.vtt.trim().length > 10) {
-            const parsed = parseVtt(data.vtt);
-            if (parsed.length > 0) {
-                cues = parsed;
-                setBadge('🤖 AI Subtitles Ready', 'rgba(168,85,247,.15)', '#c084fc', 'rgba(168,85,247,.3)');
-                renderSubs();
-                
-                // 将音频源替换为后端持久化下载的本地音频，彻底杜绝动态广告(DAI)导致的串台和不同步问题
-                if (data.local_audio) {
-                    audio.src = data.local_audio;
+        const url = `/api/transcribe_stream?audio_url=${enc(nowPlaying.url)}&title=${enc(nowPlaying.title)}&transcript_url=`;
+        const evtSource = new EventSource(url);
+        
+        evtSource.onmessage = (e) => {
+            const data = JSON.parse(e.data);
+            
+            if (data.status === 'official' || data.status === 'cached') {
+                const parsed = parseVtt(data.vtt);
+                if (parsed.length > 0) {
+                    cues = parsed;
+                    setBadge('🤖 AI Subtitles Ready', 'rgba(168,85,247,.15)', '#c084fc', 'rgba(168,85,247,.3)');
+                    renderSubs();
+                    if (data.local_audio) { audio.src = data.local_audio; }
+                    audio.play();
+                    setPlayIcon(true);
+                    toast('✅ 字幕已就绪，自动开始播放', 'success');
                 }
-                
-                // 字幕读出后才自动开始播放音频
+                evtSource.close();
+                isTranscribing = false;
+                btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Refresh';
+            }
+            else if (data.status === 'audio_ready') {
+                // 音频已经下载完毕，立刻开始播放！此时字幕还在实时生成中
+                audio.src = data.local_audio;
                 audio.play();
                 setPlayIcon(true);
-                toast('✅ 字幕已就绪，自动开始播放', 'success');
-                return;
+                cues = [];
+                document.getElementById('subScroll').innerHTML = '';
+                toast('▶️ 音频就绪，开始实时生成字幕...', 'success');
+                setBadge('⚡ Real-time Transcribing', 'rgba(168,85,247,.15)', '#c084fc', 'rgba(168,85,247,.3)');
             }
-        }
-        
-        // 如果虽然没查到字幕，但是有本地音频缓存（说明后端截取成功），也直接播放，不要卡死
-        if (data.local_audio) {
-            audio.src = data.local_audio;
-        }
-        audio.play();
-        setPlayIcon(true);
-        
-        document.getElementById('subScroll').innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3);font-size:13px">暂未生成字幕，但已为您播放声音</div>';
-        toast('AI transcription returned no results.', 'info');
+            else if (data.status === 'cue') {
+                cues.push({
+                    start: data.cue.start,
+                    end: data.cue.end,
+                    text: data.cue.text
+                });
+                renderSubs();
+            }
+            else if (data.status === 'done') {
+                toast('✅ 实时转写完成！', 'success');
+                setBadge('🤖 AI Subtitles Ready', 'rgba(168,85,247,.15)', '#c084fc', 'rgba(168,85,247,.3)');
+                evtSource.close();
+                isTranscribing = false;
+                btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Refresh';
+            }
+            else if (data.status === 'error') {
+                throw new Error(data.detail);
+            }
+        };
+
+        evtSource.onerror = (err) => {
+            evtSource.close();
+            isTranscribing = false;
+            btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Refresh';
+            if (cues.length === 0) {
+                audio.src = nowPlaying.url;
+                audio.play();
+                setPlayIcon(true);
+                document.getElementById('subScroll').innerHTML = `<div style="text-align:center;padding:40px;color:var(--text3);font-size:13px">连接中断，已自动播放原声音频。</div>`;
+            }
+        };
+
     } catch(e) {
         isTranscribing = false;
         btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Refresh';
-        
-        // 发生致命错误时，退回使用原始链接直接播放
-        audio.src = nowPlaying.url;
-        audio.play();
-        setPlayIcon(true);
-        
+        if (cues.length === 0) {
+            audio.src = nowPlaying.url;
+            audio.play();
+            setPlayIcon(true);
+        }
         document.getElementById('subScroll').innerHTML = `<div style="text-align:center;padding:40px;color:var(--text3);font-size:13px">转写失败: ${e.message}。已自动为您播放原声音频。</div>`;
         toast('Transcription error: ' + e.message, 'info');
     }

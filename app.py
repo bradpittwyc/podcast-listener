@@ -241,6 +241,92 @@ def get_or_generate_transcript(audio_url: str, title: str = "", transcript_url: 
         traceback.print_exc()
         return {"source": "error", "detail": str(e), "vtt": ""}
 
+from fastapi.responses import StreamingResponse
+import json
+
+@app.get("/api/transcribe_stream")
+def transcribe_stream(audio_url: str, title: str = "", transcript_url: str = "", force_refresh: bool = False):
+    def event_generator():
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        proxies = get_local_proxy()
+        
+        # 1. 尝试获取官方字幕
+        if transcript_url and not force_refresh:
+            try:
+                r = requests.get(transcript_url, headers=headers, timeout=10, proxies=proxies)
+                if r.status_code == 200 and "WEBVTT" in r.text.upper():
+                    yield f"data: {json.dumps({'status': 'official', 'vtt': r.text})}\n\n"
+                    return
+            except:
+                pass
+                
+        url_hash = hashlib.md5(audio_url.encode("utf-8")).hexdigest()
+        mp3_path = os.path.join(CACHE_DIR, f"{url_hash}.mp3")
+        local_audio = f"/cache/{url_hash}.mp3"
+        vtt_path = os.path.join(CACHE_DIR, f"{url_hash}.vtt")
+        
+        if os.path.exists(vtt_path) and os.path.exists(mp3_path) and not force_refresh:
+            with open(vtt_path, "r", encoding="utf-8") as f:
+                content = f.read()
+                yield f"data: {json.dumps({'status': 'cached', 'vtt': content, 'local_audio': local_audio})}\n\n"
+                return
+                
+        # 2. 极速下载完整音频
+        if not os.path.exists(mp3_path) or force_refresh:
+            try:
+                with requests.get(audio_url, headers=headers, stream=True, allow_redirects=True, timeout=30, proxies=proxies) as r:
+                    r.raise_for_status()
+                    with open(mp3_path, "wb") as f:
+                        for chunk in r.iter_content(chunk_size=512 * 1024):
+                            f.write(chunk)
+            except Exception as e:
+                yield f"data: {json.dumps({'status': 'error', 'detail': f'Download failed: {str(e)}'})}\n\n"
+                return
+
+        # 告诉前端音频已就绪，可以立刻开始播放！
+        yield f"data: {json.dumps({'status': 'audio_ready', 'local_audio': local_audio})}\n\n"
+
+        # 3. 实时流式转写（本地模型逐句吐出）
+        try:
+            model = get_whisper_model()
+            segments, _ = model.transcribe(
+                mp3_path,
+                language="en",
+                beam_size=1,
+                best_of=1,
+                vad_filter=True,
+                vad_parameters=dict(min_silence_duration_ms=500),
+                initial_prompt="This is an English podcast episode transcript."
+            )
+            
+            vtt_lines = ["WEBVTT", ""]
+            prev_text = ""
+            for seg in segments:
+                text = seg.text.strip()
+                if text and text != prev_text:
+                    cue = {
+                        "start": seg.start,
+                        "end": seg.end,
+                        "text": text
+                    }
+                    yield f"data: {json.dumps({'status': 'cue', 'cue': cue})}\n\n"
+                    
+                    s = format_timestamp_vtt(seg.start)
+                    e = format_timestamp_vtt(seg.end)
+                    vtt_lines.append(f"{s} --> {e}\n{text}\n")
+                    prev_text = text
+                    
+            # 转写完毕，保存完整 VTT 供下次使用
+            with open(vtt_path, "w", encoding="utf-8") as f:
+                f.write("\n".join(vtt_lines))
+                
+            yield f"data: {json.dumps({'status': 'done'})}\n\n"
+            
+        except Exception as e:
+            yield f"data: {json.dumps({'status': 'error', 'detail': str(e)})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
 @app.api_route("/api/define", methods=["GET", "POST", "HEAD"])
 def define_word(word: str = Query(..., min_length=1), context: str = ""):
     """
