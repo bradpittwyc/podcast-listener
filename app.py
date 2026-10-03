@@ -36,10 +36,10 @@ whisper_model = None
 def get_whisper_model():
     global whisper_model
     if whisper_model is None:
-        print("Loading Whisper AI model (small.en)...")
-        # Use small.en for English podcasts with high accuracy on CPU, cpu_threads=4 for speed
-        whisper_model = faster_whisper.WhisperModel("small.en", device="cpu", compute_type="int8", cpu_threads=4)
-        print("Whisper AI (small.en) ready.")
+        print("Loading Whisper AI model (base.en)...")
+        # Use base.en for ultra-fast English podcast transcription (2-3 seconds on CPU)
+        whisper_model = faster_whisper.WhisperModel("base.en", device="cpu", compute_type="int8", cpu_threads=4)
+        print("Whisper AI (base.en) ready.")
     return whisper_model
 
 def upgrade_to_hd_image(img_url: str) -> str:

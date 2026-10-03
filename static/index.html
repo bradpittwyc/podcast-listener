@@ -725,13 +725,19 @@ function startPlay(url, title, author, cover, transcriptUrl, description) {
 
     if (audio.src !== url) audio.src = url;
     audio.playbackRate = speed;
-    audio.play();
-    setPlayIcon(true);
+    
+    // 限制：如果没有读出字幕，就不要开始播放，保持暂停状态
+    audio.pause();
+    setPlayIcon(false);
 
     loadSubtitles(url, title, transcriptUrl, description);
 }
 
 function togglePlay() {
+    if (isTranscribing || (!cues || !cues.length)) {
+        toast('⏳ 字幕正在转写中，就绪后将自动开启播放', 'info');
+        return;
+    }
     if (audio.paused) { audio.play(); setPlayIcon(true); }
     else { audio.pause(); setPlayIcon(false); }
 }
@@ -837,10 +843,10 @@ async function loadSubtitles(audioUrl, title, transcriptUrl, description) {
         <div style="text-align:center;padding:50px 20px;color:var(--text2)">
             <div class="spinner" style="margin:0 auto 16px auto;"></div>
             <div style="font-size:14px;font-weight:600;margin-bottom:6px;">🤖 AI 字幕转写中...</div>
-            <div style="font-size:12px;color:var(--text3);">使用 Whisper AI 实时转写，预计需 5~10 秒，请稍候</div>
+            <div style="font-size:12px;color:var(--text3);">字幕读出前暂停播放，转写完成后将自动开始</div>
         </div>
     `;
-    setBadge('🤖 AI 转写中...', 'rgba(59,130,246,.15)', '#93c5fd', 'rgba(59,130,246,.3)');
+    setBadge('🤖 AI 转写中 (暂停播放)...', 'rgba(59,130,246,.15)', '#93c5fd', 'rgba(59,130,246,.3)');
 
     // Step 1: official VTT transcript
     if (transcriptUrl) {
@@ -854,7 +860,9 @@ async function loadSubtitles(audioUrl, title, transcriptUrl, description) {
                     cues = parsed;
                     setBadge('✅ Official Transcript', 'rgba(245,158,11,.15)', '#fbbf24', 'rgba(245,158,11,.3)');
                     renderSubs();
-                    toast('Official transcript loaded.', 'success');
+                    audio.play();
+                    setPlayIcon(true);
+                    toast('Official transcript loaded — playing.', 'success');
                     return;
                 }
             }
@@ -882,9 +890,12 @@ async function triggerAiTranscribe(auto = false) {
             const parsed = parseVtt(data.vtt);
             if (parsed.length > 0) {
                 cues = parsed;
-                setBadge('🤖 AI-generated (Whisper)', 'rgba(168,85,247,.15)', '#c084fc', 'rgba(168,85,247,.3)');
+                setBadge('🤖 AI Subtitles Ready', 'rgba(168,85,247,.15)', '#c084fc', 'rgba(168,85,247,.3)');
                 renderSubs();
-                toast('✅ AI 字幕已就绪', 'success');
+                // 字幕读出后才自动开始播放音频
+                audio.play();
+                setPlayIcon(true);
+                toast('✅ 字幕已就绪，自动开始播放', 'success');
                 return;
             }
         }
