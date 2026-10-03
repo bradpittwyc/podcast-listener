@@ -831,19 +831,18 @@ async function loadSubtitles(audioUrl, title, transcriptUrl, description) {
     cues = [];
     activeCue = -1;
 
-    // Step 1: description preview
-    const src = (description && description.length > 20) ? description : title;
-    const sentences = src.split(/(?<=[.!?])\s+/).filter(s => s.trim());
-    let t = 0;
-    sentences.forEach(s => {
-        const dur = Math.max(3.5, s.length * 0.22);
-        cues.push({ start: t, end: t + dur, text: s.trim() });
-        t += dur + 0.3;
-    });
-    setBadge('📄 Description Preview', 'rgba(100,116,139,.18)', '#94a3b8', 'rgba(100,116,139,.3)');
-    renderSubs(true);
+    // Display clean loading indicator — no fake placeholder subtitles
+    const el = document.getElementById('subScroll');
+    el.innerHTML = `
+        <div style="text-align:center;padding:50px 20px;color:var(--text2)">
+            <div class="spinner" style="margin:0 auto 16px auto;"></div>
+            <div style="font-size:14px;font-weight:600;margin-bottom:6px;">🤖 AI 字幕转写中...</div>
+            <div style="font-size:12px;color:var(--text3);">使用 Whisper AI 实时转写，预计需 5~10 秒，请稍候</div>
+        </div>
+    `;
+    setBadge('🤖 AI 转写中...', 'rgba(59,130,246,.15)', '#93c5fd', 'rgba(59,130,246,.3)');
 
-    // Step 2: official VTT
+    // Step 1: official VTT transcript
     if (transcriptUrl) {
         try {
             toast('Fetching official transcript...', 'info');
@@ -854,7 +853,7 @@ async function loadSubtitles(audioUrl, title, transcriptUrl, description) {
                 if (parsed.length > 0) {
                     cues = parsed;
                     setBadge('✅ Official Transcript', 'rgba(245,158,11,.15)', '#fbbf24', 'rgba(245,158,11,.3)');
-                    renderSubs(false);
+                    renderSubs();
                     toast('Official transcript loaded.', 'success');
                     return;
                 }
@@ -862,7 +861,7 @@ async function loadSubtitles(audioUrl, title, transcriptUrl, description) {
         } catch(e) { console.log('VTT fetch:', e); }
     }
 
-    // Step 3: Whisper
+    // Step 2: Whisper AI transcription
     triggerAiTranscribe(true);
 }
 
@@ -871,7 +870,7 @@ async function triggerAiTranscribe(auto = false) {
     isTranscribing = true;
     const btn = document.getElementById('refreshBtn');
     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Transcribing...';
-    setBadge('🤖 AI transcribing...', 'rgba(59,130,246,.15)', '#93c5fd', 'rgba(59,130,246,.3)');
+    setBadge('🤖 AI 转写中...', 'rgba(59,130,246,.15)', '#93c5fd', 'rgba(59,130,246,.3)');
     if (!auto) toast('Whisper AI is transcribing...', 'info');
 
     try {
@@ -884,15 +883,17 @@ async function triggerAiTranscribe(auto = false) {
             if (parsed.length > 0) {
                 cues = parsed;
                 setBadge('🤖 AI-generated (Whisper)', 'rgba(168,85,247,.15)', '#c084fc', 'rgba(168,85,247,.3)');
-                renderSubs(false);
-                toast('✅ AI subtitles ready — assistive use only', 'success');
+                renderSubs();
+                toast('✅ AI 字幕已就绪', 'success');
                 return;
             }
         }
+        document.getElementById('subScroll').innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3);font-size:13px">暂未生成字幕</div>';
         toast('AI transcription returned no results.', 'info');
     } catch(e) {
         isTranscribing = false;
         btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Refresh';
+        document.getElementById('subScroll').innerHTML = `<div style="text-align:center;padding:40px;color:var(--text3);font-size:13px">转写失败: ${e.message}</div>`;
         toast('Transcription error: ' + e.message, 'info');
     }
 }
@@ -905,19 +906,13 @@ function setBadge(text, bg, color, border) {
     b.style.borderColor = border;
 }
 
-function renderSubs(isPreview = false) {
+function renderSubs() {
     const el = document.getElementById('subScroll');
     if (!cues.length) {
-        el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3);font-size:13px">No subtitles available yet.</div>';
+        el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3);font-size:13px">暂无可用字幕</div>';
         return;
     }
     let h = '';
-    if (isPreview) {
-        h += `<div class="preview-alert">
-            <i class="fa-solid fa-triangle-exclamation"></i>
-            <span>No official transcript — showing episode description as placeholder. AI (Whisper) generating subtitles in background...</span>
-        </div>`;
-    }
     cues.forEach((c, i) => {
         const saved = savedCues.has(i);
         h += `<div class="sub-line" id="cue-${i}" onclick="jumpTo(${c.start})">

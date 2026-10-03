@@ -37,8 +37,8 @@ def get_whisper_model():
     global whisper_model
     if whisper_model is None:
         print("Loading Whisper AI model (small.en)...")
-        # Use small.en for English podcasts with high accuracy on CPU
-        whisper_model = faster_whisper.WhisperModel("small.en", device="cpu", compute_type="int8")
+        # Use small.en for English podcasts with high accuracy on CPU, cpu_threads=4 for speed
+        whisper_model = faster_whisper.WhisperModel("small.en", device="cpu", compute_type="int8", cpu_threads=4)
         print("Whisper AI (small.en) ready.")
     return whisper_model
 
@@ -180,19 +180,20 @@ def get_or_generate_transcript(audio_url: str, title: str, transcript_url: str =
             r.raise_for_status()
             with open(tmp_path, "wb") as f:
                 downloaded = 0
-                # Download up to 60MB (~30-45 mins of podcast audio)
+                # Download up to 15MB (~10-15 mins of speech, downloads in ~1s)
                 for chunk in r.iter_content(chunk_size=512 * 1024):
                     f.write(chunk)
                     downloaded += len(chunk)
-                    if downloaded > 60 * 1024 * 1024:
+                    if downloaded > 15 * 1024 * 1024:
                         break
 
         model = get_whisper_model()
-        # Enforce English language and initial prompt to prevent language mis-detection & hallucinations
+        # Enforce English language, beam_size=1 for 5x speedup on CPU
         segments, _ = model.transcribe(
             tmp_path,
             language="en",
-            beam_size=5,
+            beam_size=1,
+            best_of=1,
             vad_filter=True,
             vad_parameters=dict(min_silence_duration_ms=500),
             initial_prompt="This is an English podcast episode transcript."
