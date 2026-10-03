@@ -230,7 +230,7 @@ def define_word(word: str = Query(..., min_length=1), context: str = ""):
 
     try:
         response = gemini_client.models.generate_content(
-            model=os.environ.get("GEMINI_MODEL", "gemini-3.8-flash"),
+            model=os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite"),
             contents=prompt,
             config={"response_mime_type": "application/json"},
         )
