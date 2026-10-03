@@ -915,11 +915,15 @@ async function triggerAiTranscribe(auto = false) {
                 audio.play();
                 setPlayIcon(true);
                 cues = [];
-                document.getElementById('subScroll').innerHTML = '';
-                toast('▶️ 音频就绪，开始实时生成字幕...', 'success');
-                setBadge('⚡ Real-time Transcribing', 'rgba(168,85,247,.15)', '#c084fc', 'rgba(168,85,247,.3)');
+                document.getElementById('subScroll').innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3);font-size:13px;line-height:2"><i class="fa-solid fa-spinner fa-spin"></i><br/>AI 模型正在进行静音检测与预热<br/>（通常需要 5~15 秒）<br/>请边听边等待，第一句字幕马上就来...</div>';
+                toast('▶️ 音频就绪，AI 预热中...', 'success');
+                setBadge('⚡ AI Warming Up...', 'rgba(168,85,247,.15)', '#c084fc', 'rgba(168,85,247,.3)');
             }
             else if (data.status === 'cue') {
+                if (cues.length === 0) {
+                    setBadge('⚡ Real-time Transcribing', 'rgba(168,85,247,.15)', '#c084fc', 'rgba(168,85,247,.3)');
+                    toast('字幕流已开启！', 'success');
+                }
                 cues.push({
                     start: data.cue.start,
                     end: data.cue.end,
@@ -935,7 +939,11 @@ async function triggerAiTranscribe(auto = false) {
                 btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Refresh';
             }
             else if (data.status === 'error') {
-                throw new Error(data.detail);
+                toast('转写错误: ' + data.detail, 'info');
+                document.getElementById('subScroll').innerHTML = `<div style="text-align:center;padding:40px;color:var(--text3);font-size:13px">转写终止: ${data.detail}</div>`;
+                evtSource.close();
+                isTranscribing = false;
+                btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Refresh';
             }
         };
 
@@ -947,7 +955,7 @@ async function triggerAiTranscribe(auto = false) {
                 audio.src = nowPlaying.url;
                 audio.play();
                 setPlayIcon(true);
-                document.getElementById('subScroll').innerHTML = `<div style="text-align:center;padding:40px;color:var(--text3);font-size:13px">连接中断，已自动播放原声音频。</div>`;
+                document.getElementById('subScroll').innerHTML = `<div style="text-align:center;padding:40px;color:var(--text3);font-size:13px">SSE 连接中断，已自动播放原声音频。</div>`;
             }
         };
 

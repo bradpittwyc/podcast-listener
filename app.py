@@ -323,6 +323,8 @@ def transcribe_stream(audio_url: str, title: str = "", transcript_url: str = "",
             yield f"data: {json.dumps({'status': 'done'})}\n\n"
             
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             yield f"data: {json.dumps({'status': 'error', 'detail': str(e)})}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
