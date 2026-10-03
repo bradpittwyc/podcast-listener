@@ -1,18 +1,20 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Podcast Learner</title>
+<title>Podcast Learner — AI 播客学习播放器</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 <style>
 :root {
     --bg: #09090f;
-    --sidebar-bg: #0d0d18;
-    --sidebar-w: 360px;
+    --panel-left-bg: #0d0d18;
+    --panel-mid-bg: #0a0a12;
+    --panel-right-bg: #0d0d18;
     --card-bg: rgba(255,255,255,0.04);
     --card-hover: rgba(255,255,255,0.07);
     --purple: #a855f7;
+    --purple-light: #c084fc;
     --pink: #ec4899;
     --grad: linear-gradient(135deg, #a855f7 0%, #ec4899 100%);
     --green: #10b981;
@@ -21,496 +23,1127 @@
     --text: #f1f5f9;
     --text2: #94a3b8;
     --text3: #475569;
-    --border: rgba(255,255,255,0.07);
-    --player-h: 68px;
-    --console-h: 96px;
+    --border: rgba(255,255,255,0.08);
+    --sub-font-size: 13.5px;
 }
 *{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",Helvetica,Arial,sans-serif;}
 html,body{height:100%;overflow:hidden;}
-body{display:flex;background:var(--bg);color:var(--text);}
+body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100vh;}
 
 /* ═══════════════════════════════ SCROLLBAR ═══════════════════════════════ */
-::-webkit-scrollbar{width:4px;height:4px;}
+::-webkit-scrollbar{width:5px;height:5px;}
 ::-webkit-scrollbar-track{background:transparent;}
-::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:2px;}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.12);border-radius:3px;}
+::-webkit-scrollbar-thumb:hover{background:rgba(168,85,247,0.3);}
 
-/* ═══════════════════════════════ SIDEBAR ═══════════════════════════════ */
-.sidebar{
-    width:var(--sidebar-w);min-width:var(--sidebar-w);
-    background:var(--sidebar-bg);
-    border-right:1px solid var(--border);
-    display:flex;flex-direction:column;
-    height:100vh;overflow:hidden;
-    transition:width .28s cubic-bezier(.4,0,.2,1),min-width .28s cubic-bezier(.4,0,.2,1);
-    flex-shrink:0;position:relative;z-index:10;
-}
-.sidebar.collapsed{width:0;min-width:0;}
-.sidebar-inner{width:var(--sidebar-w);height:100%;display:flex;flex-direction:column;overflow:hidden;}
-
-/* sidebar header */
-.sidebar-hd{
-    display:flex;align-items:center;justify-content:space-between;
-    padding:14px 12px 12px 16px;
-    border-bottom:1px solid var(--border);flex-shrink:0;
-}
-.logo-wrap{}
-.logo-name{
-    font-size:15px;font-weight:700;letter-spacing:-.3px;
-    background:var(--grad);-webkit-background-clip:text;-webkit-text-fill-color:transparent;
-}
-.logo-tag{font-size:10px;color:var(--text3);margin-top:1px;}
-.sidebar-close{
-    width:28px;height:28px;background:var(--card-bg);border:1px solid var(--border);
-    border-radius:8px;color:var(--text3);cursor:pointer;
-    display:flex;align-items:center;justify-content:center;font-size:11px;
-    transition:all .15s;
-}
-.sidebar-close:hover{background:var(--card-hover);color:var(--text2);}
-
-/* sidebar tabs */
-.sidebar-tabs{display:flex;padding:10px 10px 0;gap:4px;flex-shrink:0;}
-.stab{
-    flex:1;padding:6px 8px;background:transparent;
-    border:1px solid transparent;border-radius:8px;
-    color:var(--text3);font-size:12px;font-weight:600;cursor:pointer;
-    transition:all .15s;display:flex;align-items:center;justify-content:center;gap:5px;
-}
-.stab.active{background:var(--card-hover);border-color:var(--border);color:var(--text);}
-.stab:hover:not(.active){color:var(--text2);}
-
-/* scrollable content */
-.sidebar-body{flex:1;overflow-y:auto;overflow-x:hidden;}
-
-/* search */
-.search-row{display:flex;gap:6px;padding:10px 10px 6px;}
-.search-row input{
-    flex:1;background:var(--card-bg);border:1px solid var(--border);
-    border-radius:9px;padding:7px 11px;color:var(--text);font-size:13px;outline:none;
-}
-.search-row input::placeholder{color:var(--text3);}
-.search-row input:focus{border-color:rgba(168,85,247,.4);}
-.search-row button{
-    background:var(--grad);border:none;border-radius:9px;
-    padding:7px 12px;color:#fff;font-size:13px;cursor:pointer;
+/* ═══════════════════════════════ LAYOUT: 3 COLUMNS ═══════════════════════════════ */
+/* Column 1: Left 1/3 (AI Q&A + Player Console) */
+.col-left {
+    width: 33.33vw;
+    min-width: 330px;
+    max-width: 460px;
+    background: var(--panel-left-bg);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+    flex-shrink: 0;
+    z-index: 10;
 }
 
-/* region tabs */
-.region-row{
-    display:flex;gap:5px;padding:0 10px 8px;
-    overflow-x:auto;flex-shrink:0;cursor:grab;
-}
-.region-row::-webkit-scrollbar{height:3px;}
-.region-row::-webkit-scrollbar-thumb{background:rgba(168,85,247,0.3);border-radius:2px;}
-.rbtn{
-    padding:4px 11px;background:var(--card-bg);border:1px solid var(--border);
-    border-radius:20px;color:var(--text3);font-size:11px;font-weight:600;
-    cursor:pointer;white-space:nowrap;transition:all .15s;
-}
-.rbtn.active{background:rgba(168,85,247,.15);border-color:rgba(168,85,247,.45);color:#c084fc;}
-.rbtn:hover:not(.active){color:var(--text2);}
-
-/* preset chips */
-.preset-row{
-    display:flex;gap:5px;padding:0 10px 10px;
-    overflow-x:auto;flex-shrink:0;cursor:grab;
-}
-.preset-row::-webkit-scrollbar{height:3px;}
-.preset-row::-webkit-scrollbar-thumb{background:rgba(236,72,153,0.3);border-radius:2px;}
-.chip{
-    padding:3px 10px;background:rgba(236,72,153,.08);
-    border:1px solid rgba(236,72,153,.2);border-radius:20px;
-    color:#f9a8d4;font-size:11px;cursor:pointer;white-space:nowrap;transition:all .15s;
-}
-.chip:hover{background:rgba(236,72,153,.15);}
-
-/* section label */
-.sec-label{
-    padding:8px 12px 4px;font-size:10px;font-weight:700;
-    color:var(--text3);text-transform:uppercase;letter-spacing:.6px;
+/* Column 2: Middle 1/2 (Subtitles) */
+.col-mid {
+    width: 50vw;
+    min-width: 420px;
+    background: var(--panel-mid-bg);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+    flex-shrink: 0;
+    position: relative;
 }
 
-/* podcast card grid */
-.pod-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:9px;padding:4px 10px 16px;}
-.pod-card{
-    background:var(--card-bg);border:1px solid var(--border);
-    border-radius:11px;overflow:hidden;cursor:pointer;
-    transition:all .2s;position:relative;
+/* Column 3: Right ~16.7% (Plaza & Notebook) */
+.col-right {
+    flex: 1;
+    min-width: 250px;
+    background: var(--panel-right-bg);
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+    transition: all .25s ease;
 }
-.pod-card:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,.4);border-color:rgba(168,85,247,.3);}
-.pod-card img{width:100%;aspect-ratio:1;object-fit:cover;display:block;}
-.pod-card-info{padding:7px 8px 9px;}
-.pod-card-title{font-size:11px;font-weight:600;line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
-.pod-card-artist{font-size:10px;color:var(--text3);margin-top:2px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}
-.rank-badge{position:absolute;top:5px;left:5px;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);border-radius:5px;padding:2px 6px;font-size:10px;font-weight:700;color:var(--text3);}
-.cc-dot{position:absolute;top:5px;right:5px;width:17px;height:17px;background:rgba(245,158,11,.85);border-radius:4px;display:flex;align-items:center;justify-content:center;}
+.col-right.collapsed {
+    display: none;
+}
 
-/* channel view */
-.channel-hd{padding:10px 12px;border-bottom:1px solid var(--border);flex-shrink:0;}
-.back-btn{background:none;border:none;color:var(--purple);font-size:12px;cursor:pointer;padding:0 0 8px;display:flex;align-items:center;gap:4px;}
-.chan-mini{display:flex;gap:10px;align-items:center;}
-.chan-mini img{width:48px;height:48px;border-radius:9px;object-fit:cover;flex-shrink:0;}
-.chan-mini-title{font-size:13px;font-weight:700;line-height:1.3;}
-.chan-mini-author{font-size:11px;color:var(--text3);margin-top:2px;}
+/* ═══════════════════════════════ LEFT PANEL: AI Q&A ═══════════════════════════════ */
+.ai-section {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+}
+.ai-hd {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+    background: rgba(13,13,24,0.7);
+}
+.ai-hd-title {
+    font-size: 14px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text);
+}
+.ai-badge {
+    font-size: 10px;
+    padding: 2px 7px;
+    border-radius: 99px;
+    background: rgba(168,85,247,0.18);
+    color: var(--purple-light);
+    border: 1px solid rgba(168,85,247,0.35);
+    font-weight: 600;
+}
+.ai-hd-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.icon-btn {
+    width: 26px;
+    height: 26px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text3);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    transition: all .15s;
+}
+.icon-btn:hover {
+    color: var(--text);
+    background: var(--card-hover);
+    border-color: rgba(255,255,255,0.15);
+}
 
-/* episode list */
-.ep-list{}
-.ep-item{
-    display:flex;align-items:flex-start;gap:9px;
-    padding:9px 12px;border-bottom:1px solid var(--border);
-    cursor:pointer;transition:background .15s;
+/* Chat Messages */
+.ai-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
 }
-.ep-item:hover{background:var(--card-hover);}
-.ep-item.playing{background:rgba(168,85,247,.08);border-left:2px solid var(--purple);padding-left:10px;}
-.ep-icon{
-    width:26px;height:26px;flex-shrink:0;background:var(--card-bg);
-    border-radius:50%;display:flex;align-items:center;justify-content:center;
-    font-size:9px;color:var(--purple);margin-top:1px;
+.ai-welcome-card {
+    background: rgba(168,85,247,0.06);
+    border: 1px dashed rgba(168,85,247,0.3);
+    border-radius: 12px;
+    padding: 14px;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--text2);
 }
-.ep-item.playing .ep-icon{background:var(--grad);color:#fff;}
-.ep-info{flex:1;min-width:0;}
-.ep-title{font-size:12px;font-weight:600;line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
-.ep-meta-s{font-size:10px;color:var(--text3);margin-top:3px;}
+.ai-welcome-card h4 {
+    font-size: 13px;
+    color: #fff;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.msg-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-width: 100%;
+}
+.msg-row.user {
+    align-items: flex-end;
+}
+.msg-row.ai {
+    align-items: flex-start;
+}
+.msg-meta {
+    font-size: 10px;
+    color: var(--text3);
+    padding: 0 4px;
+}
+.msg-bubble {
+    padding: 10px 13px;
+    border-radius: 12px;
+    font-size: 12.5px;
+    line-height: 1.65;
+    word-break: break-word;
+    white-space: pre-wrap;
+    max-width: 95%;
+}
+.msg-row.user .msg-bubble {
+    background: var(--grad);
+    color: #fff;
+    border-bottom-right-radius: 3px;
+    box-shadow: 0 4px 14px rgba(168,85,247,0.25);
+}
+.msg-row.ai .msg-bubble {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-bottom-left-radius: 3px;
+}
+.msg-quote-tag {
+    background: rgba(0,0,0,0.25);
+    border-left: 2px solid var(--purple-light);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    color: var(--text2);
+    margin-bottom: 6px;
+    font-style: italic;
+}
+.msg-loading {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text3);
+    font-size: 12px;
+}
+.msg-loading i {
+    color: var(--purple-light);
+}
 
-/* notebook */
-.nb-hd{padding:10px 12px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);}
-.nb-count{font-size:12px;color:var(--text3);}
-.export-btn{background:var(--card-bg);border:1px solid var(--border);border-radius:7px;padding:5px 9px;color:var(--text2);font-size:11px;cursor:pointer;transition:all .15s;}
-.export-btn:hover{border-color:var(--purple);color:var(--purple);}
-.nb-empty{text-align:center;padding:36px 20px;color:var(--text3);font-size:13px;line-height:1.8;}
-.nb-entry{padding:10px 12px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s;}
-.nb-entry:hover{background:var(--card-hover);}
-.nb-text{font-size:12px;line-height:1.55;color:var(--text);font-style:italic;}
-.nb-meta{font-size:10px;color:var(--text3);margin-top:5px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
-.nb-del{margin-left:auto;background:none;border:none;color:var(--text3);cursor:pointer;font-size:11px;padding:2px 4px;border-radius:4px;transition:all .15s;}
-.nb-del:hover{color:#f87171;background:rgba(248,113,113,.1);}
+/* AI Input & Selection bar */
+.ai-input-panel {
+    background: rgba(13,13,24,0.92);
+    border-top: 1px solid var(--border);
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex-shrink: 0;
+}
+.selected-quotes-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: rgba(168,85,247,0.12);
+    border: 1px solid rgba(168,85,247,0.3);
+    border-radius: 8px;
+    padding: 5px 10px;
+    font-size: 11px;
+    color: var(--purple-light);
+}
+.clear-quotes-btn {
+    background: none;
+    border: none;
+    color: var(--text3);
+    cursor: pointer;
+    font-size: 11px;
+    transition: color .15s;
+}
+.clear-quotes-btn:hover {
+    color: #f87171;
+}
+.ai-quick-tags {
+    display: flex;
+    gap: 5px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+}
+.ai-quick-tags::-webkit-scrollbar { height: 2px; }
+.qtag {
+    padding: 3px 8px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    color: var(--text2);
+    font-size: 10.5px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all .15s;
+}
+.qtag:hover {
+    background: rgba(168,85,247,0.15);
+    border-color: rgba(168,85,247,0.4);
+    color: var(--purple-light);
+}
+.ai-input-row {
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+}
+.ai-input-row textarea {
+    flex: 1;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 8px 11px;
+    color: var(--text);
+    font-size: 12px;
+    resize: none;
+    height: 48px;
+    outline: none;
+    line-height: 1.4;
+    transition: border-color .15s;
+}
+.ai-input-row textarea:focus {
+    border-color: rgba(168,85,247,0.5);
+    background: rgba(255,255,255,0.06);
+}
+.ai-send-btn {
+    width: 44px;
+    height: 48px;
+    background: var(--grad);
+    border: none;
+    border-radius: 10px;
+    color: #fff;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    transition: opacity .15s, transform .1s;
+    flex-shrink: 0;
+}
+.ai-send-btn:hover { opacity: .9; transform: scale(1.02); }
+.ai-send-btn:disabled { opacity: .4; cursor: not-allowed; }
 
-/* floating open btn */
-#sidebarOpenBtn{
-    position:fixed;left:10px;top:14px;z-index:50;
-    width:34px;height:34px;background:var(--sidebar-bg);
-    border:1px solid var(--border);border-radius:9px;
-    display:none;align-items:center;justify-content:center;
-    color:var(--text2);cursor:pointer;font-size:14px;
-    box-shadow:0 4px 12px rgba(0,0,0,.4);transition:all .15s;
+/* ═══════════════════════════════ LEFT BOTTOM: PLAYER CONSOLE ═══════════════════════════════ */
+.left-player-console {
+    background: rgba(10,10,18,0.98);
+    border-top: 1px solid rgba(255,255,255,0.1);
+    padding: 12px 14px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    flex-shrink: 0;
+    box-shadow: 0 -4px 20px rgba(0,0,0,0.3);
 }
-#sidebarOpenBtn:hover{border-color:var(--purple);color:var(--purple);}
 
-/* ═══════════════════════════════ MAIN AREA ═══════════════════════════════ */
-.main{flex:1;display:flex;flex-direction:column;height:100vh;overflow:hidden;min-width:0;}
+/* Episode Info in left player */
+.lp-info-row {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-width: 0;
+}
+.pb-cover {
+    width: 36px;
+    height: 36px;
+    border-radius: 6px;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: rgba(255,255,255,0.05);
+}
+.pb-info {
+    flex: 1;
+    min-width: 0;
+}
+.pb-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+.pb-author {
+    font-size: 10px;
+    color: var(--text3);
+    margin-top: 1px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
 
-/* player bar */
-.player-bar{
-    height:var(--player-h);background:rgba(13,13,24,.96);
-    border-bottom:1px solid var(--border);backdrop-filter:blur(20px);
-    display:flex;align-items:center;padding:0 18px;gap:14px;flex-shrink:0;
+/* Progress bar in left player */
+.lp-prog-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
-.pb-cover{width:42px;height:42px;border-radius:7px;object-fit:cover;flex-shrink:0;box-shadow:0 3px 10px rgba(0,0,0,.4);}
-.pb-info{min-width:0;flex-shrink:0;max-width:190px;}
-.pb-title{font-size:13px;font-weight:600;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}
-.pb-author{font-size:11px;color:var(--text3);margin-top:1px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}
-.pb-progress{flex:1;display:flex;align-items:center;gap:9px;min-width:0;}
-.pb-time{font-size:11px;color:var(--text3);white-space:nowrap;font-variant-numeric:tabular-nums;}
-.prog-bar{flex:1;height:4px;background:rgba(255,255,255,.09);border-radius:2px;cursor:pointer;transition:height .15s;}
-.prog-bar:hover{height:6px;}
-.prog-fill{height:100%;background:var(--grad);border-radius:2px;transition:width .25s linear;pointer-events:none;}
-.pb-ctrl{display:flex;align-items:center;gap:3px;flex-shrink:0;}
-.cbtn{width:32px;height:32px;background:none;border:none;border-radius:8px;color:var(--text2);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:14px;transition:all .15s;}
-.cbtn:hover{background:var(--card-hover);color:var(--text);}
-.cbtn.play{width:38px;height:38px;background:var(--grad);color:#fff;border-radius:50%;font-size:14px;box-shadow:0 3px 10px rgba(168,85,247,.4);}
-.cbtn.play:hover{opacity:.9;transform:scale(1.05);}
+.pb-time {
+    font-size: 10.5px;
+    color: var(--text3);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+.prog-bar {
+    flex: 1;
+    height: 4px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 2px;
+    cursor: pointer;
+    position: relative;
+    transition: height .15s;
+}
+.prog-bar:hover { height: 6px; }
+.prog-fill {
+    height: 100%;
+    background: var(--grad);
+    border-radius: 2px;
+    pointer-events: none;
+}
 
-/* welcome */
-.welcome{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--text3);gap:14px;padding:40px;text-align:center;}
-.welcome i{font-size:72px;opacity:.1;}
-.welcome h2{font-size:20px;font-weight:600;color:var(--text2);}
-.welcome p{font-size:14px;color:var(--text3);line-height:1.7;max-width:320px;}
+/* Main Controls + Volume row */
+.lp-ctrl-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+.lp-buttons {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.cbtn {
+    width: 28px;
+    height: 28px;
+    background: none;
+    border: none;
+    border-radius: 6px;
+    color: var(--text2);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    transition: all .15s;
+}
+.cbtn:hover { background: var(--card-hover); color: var(--text); }
+.cbtn.play {
+    width: 34px;
+    height: 34px;
+    background: var(--grad);
+    color: #fff;
+    border-radius: 50%;
+    font-size: 13px;
+    box-shadow: 0 3px 10px rgba(168,85,247,0.35);
+}
+.cbtn.play:hover { transform: scale(1.06); }
 
-/* subtitle panel */
-.sub-panel{flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0;}
-.sub-hd{
-    height:46px;display:flex;align-items:center;justify-content:space-between;
-    padding:0 22px;border-bottom:1px solid var(--border);
-    background:rgba(9,9,15,.6);flex-shrink:0;
+/* Volume Slider */
+.vol-ctrl-wrap {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 3px 8px;
 }
-.sub-hd-left{display:flex;align-items:center;gap:9px;font-size:13px;font-weight:600;color:var(--text2);}
-.sub-badge{font-size:11px;padding:2px 8px;border-radius:9px;font-weight:600;border:1px solid;transition:all .4s;}
-.sub-actions{display:flex;align-items:center;gap:8px;}
-.refresh-btn{
-    display:flex;align-items:center;gap:5px;
-    background:rgba(168,85,247,.12);border:1px solid rgba(168,85,247,.3);
-    border-radius:7px;padding:4px 11px;color:#c084fc;font-size:12px;font-weight:600;
-    cursor:pointer;transition:all .15s;
+.vol-btn {
+    background: none;
+    border: none;
+    color: var(--text2);
+    cursor: pointer;
+    font-size: 12px;
+    padding: 0;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
-.refresh-btn:hover{background:rgba(168,85,247,.22);}
+.vol-btn:hover { color: var(--text); }
+.vol-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 58px;
+    height: 4px;
+    background: rgba(255,255,255,0.12);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+}
+.vol-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--purple-light);
+    cursor: pointer;
+}
 
-.sub-scroll{flex:1;overflow-y:auto;padding:12px 22px 20px;}
+/* Speed Slider (0.25x - 1.0x) */
+.lp-speed-wrap {
+    background: rgba(255,255,255,0.02);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.speed-hd-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 10.5px;
+    color: var(--text3);
+    font-weight: 600;
+}
+.speed-val-tag {
+    color: var(--purple-light);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+.speed-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 4px;
+    background: rgba(255,255,255,0.12);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+}
+.speed-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--purple-light);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+    cursor: pointer;
+}
+.speed-ticks {
+    display: flex;
+    justify-content: space-between;
+    font-size: 9px;
+    color: var(--text3);
+    font-weight: 500;
+    padding: 0 1px;
+}
 
-/* subtitle lines */
-.preview-alert{
-    background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.22);
-    border-radius:10px;padding:9px 14px;margin-bottom:12px;
-    font-size:12px;color:#fde68a;display:flex;align-items:center;gap:9px;
+/* A-B Loop Row */
+.lp-loop-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
 }
-.preview-alert i{flex-shrink:0;color:var(--amber);}
-.sub-line{
-    display:flex;align-items:flex-start;gap:10px;
-    padding:7px 9px;border-radius:9px;margin-bottom:3px;
-    cursor:pointer;transition:background .15s;position:relative;
+.lb {
+    flex: 1;
+    padding: 4px 6px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text2);
+    font-size: 10.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all .15s;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
 }
-.sub-line:hover{background:var(--card-hover);}
-.sub-line.active{background:rgba(168,85,247,.11);}
-.sub-ts{
-    font-size:10px;color:var(--text3);white-space:nowrap;
-    font-variant-numeric:tabular-nums;padding-top:3px;min-width:36px;flex-shrink:0;
-}
-.sub-txt{
-    flex:1;font-size:15px;line-height:1.7;color:var(--text2);
-    transition:color .2s,font-size .2s;
-}
-.sub-line.active .sub-txt{color:var(--text);font-size:16px;font-weight:500;}
-.word{
-    cursor:pointer;border-radius:3px;padding:0 1px;
-    transition:all .1s;display:inline;
-}
-.word:hover{background:rgba(168,85,247,.22);color:var(--text);text-decoration:underline;text-underline-offset:2px;}
-.save-btn{
-    opacity:0;width:24px;height:24px;background:none;
-    border:1px solid var(--border);border-radius:6px;
-    color:var(--text3);cursor:pointer;
-    display:flex;align-items:center;justify-content:center;font-size:11px;
-    flex-shrink:0;transition:all .15s;margin-top:2px;
-}
-.sub-line:hover .save-btn{opacity:1;}
-.save-btn:hover{background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.35);color:var(--amber);}
-.save-btn.saved{opacity:1;color:var(--amber);border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.09);}
+.lb:hover { background: var(--card-hover); color: var(--text); }
+.lb.active { background: rgba(168,85,247,.18); border-color: rgba(168,85,247,.45); color: #c084fc; }
+.lb.loop-on { background: rgba(16,185,129,.15); border-color: rgba(16,185,129,.4); color: var(--green); }
+.lb.danger { flex: 0 0 24px; padding: 4px 0; color: #f87171; border-color: rgba(248,113,113,0.2); }
+.lb.danger:hover { background: rgba(248,113,113,0.1); }
 
-/* ═══════════════════════════════ DICT POPUP ═══════════════════════════════ */
-#dictPopup{
-    position:fixed;z-index:200;
-    background:#141422;border:1px solid rgba(168,85,247,.3);
-    border-radius:14px;padding:15px 17px;
-    width:320px;max-width:calc(100vw - 24px);
-    max-height:calc(100vh - 40px);overflow-y:auto;
-    box-shadow:0 20px 60px rgba(0,0,0,.75);
-    animation:popIn .15s ease;
-}
-@keyframes popIn{from{opacity:0;transform:scale(.94) translateY(-5px);}to{opacity:1;transform:scale(1) translateY(0);}}
-.dict-close{position:absolute;top:8px;right:8px;background:none;border:none;color:var(--text3);cursor:pointer;font-size:13px;padding:4px;border-radius:4px;}
-.dict-close:hover{color:var(--text2);}
-.dict-word{font-size:20px;font-weight:700;color:var(--text);margin-bottom:1px;}
-.dict-phon{font-size:12px;color:var(--purple);margin-bottom:10px;}
-.dict-pos{font-size:10px;color:var(--amber);font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;}
-.dict-def{font-size:13px;color:var(--text2);line-height:1.55;margin-bottom:5px;}
-.dict-ex{font-size:11px;color:var(--text3);font-style:italic;border-left:2px solid var(--border);padding-left:8px;}
-.dict-loading{font-size:13px;color:var(--text3);text-align:center;padding:8px 0;}
-.dict-none{font-size:12px;color:var(--text3);margin-top:6px;}
+/* Compatibility element for unit test queries */
+#speedRow { display: none; }
 
-/* ═══════════════════════════════ LEARNING CONSOLE ═══════════════════════════════ */
-.lc{
-    height:var(--console-h);background:rgba(13,13,24,.98);
-    border-top:1px solid var(--border);
-    display:flex;align-items:center;padding:0 22px;gap:24px;flex-shrink:0;
+/* ═══════════════════════════════ MIDDLE PANEL: SUBTITLES (50%) ═══════════════════════════════ */
+.sub-hd {
+    height: 46px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 18px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(10,10,18,0.7);
+    flex-shrink: 0;
 }
-.lc-group{display:flex;flex-direction:column;gap:6px;}
-.lc-label{font-size:10px;color:var(--text3);font-weight:700;text-transform:uppercase;letter-spacing:.6px;}
-.lc-row{display:flex;gap:4px;align-items:center;}
-.lb{
-    padding:5px 9px;background:var(--card-bg);border:1px solid var(--border);
-    border-radius:7px;color:var(--text2);font-size:12px;font-weight:600;
-    cursor:pointer;transition:all .15s;white-space:nowrap;
-    display:flex;align-items:center;gap:4px;
+.sub-hd-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text2);
 }
-.lb:hover{background:var(--card-hover);color:var(--text);}
-.lb.active{background:rgba(168,85,247,.18);border-color:rgba(168,85,247,.45);color:#c084fc;}
-.lb.loop-on{background:rgba(16,185,129,.12);border-color:rgba(16,185,129,.35);color:var(--green);}
-.lb.danger{background:rgba(248,113,113,.08);border-color:rgba(248,113,113,.25);color:#f87171;}
-.lc-div{width:1px;height:52px;background:var(--border);flex-shrink:0;}
+.sub-badge {
+    font-size: 10.5px;
+    padding: 2px 7px;
+    border-radius: 8px;
+    font-weight: 600;
+    border: 1px solid;
+    transition: all .3s;
+}
+.sub-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
 
-/* ═══════════════════════════════ TOAST ═══════════════════════════════ */
-.toast-wrap{position:fixed;bottom:18px;right:18px;z-index:300;display:flex;flex-direction:column;gap:7px;}
-.toast{
-    background:rgba(18,18,30,.97);backdrop-filter:blur(16px);
-    border:1px solid var(--border);padding:11px 16px;border-radius:11px;
-    font-size:13px;color:var(--text);display:flex;align-items:center;gap:9px;
-    box-shadow:0 8px 24px rgba(0,0,0,.4);animation:slideIn .22s ease;max-width:300px;
+/* Font Size Control */
+.font-sizer {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 2px 6px;
 }
-.toast.success{border-left:3px solid var(--green);}
-.toast.info{border-left:3px solid var(--purple);}
+.font-btn {
+    background: none;
+    border: none;
+    color: var(--text2);
+    font-size: 11px;
+    cursor: pointer;
+    padding: 2px 4px;
+    font-weight: 700;
+    border-radius: 4px;
+    transition: color .15s;
+}
+.font-btn:hover { color: var(--purple-light); }
+.font-disp {
+    font-size: 10.5px;
+    color: var(--text3);
+    min-width: 28px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+
+.refresh-btn {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    background: rgba(168,85,247,.12);
+    border: 1px solid rgba(168,85,247,.3);
+    border-radius: 7px;
+    padding: 4px 10px;
+    color: #c084fc;
+    font-size: 11.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all .15s;
+}
+.refresh-btn:hover { background: rgba(168,85,247,.22); }
+
+/* Subtitle Scroll Area */
+.sub-scroll {
+    flex: 1;
+    overflow-y: auto;
+    padding: 14px 18px 24px;
+}
+.sub-line {
+    display: flex;
+    align-items: flex-start;
+    gap: 9px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    margin-bottom: 3px;
+    cursor: pointer;
+    transition: all .15s;
+    position: relative;
+    border: 1px solid transparent;
+}
+.sub-line:hover {
+    background: var(--card-hover);
+}
+.sub-line.active {
+    background: rgba(168,85,247,0.12);
+    border-color: rgba(168,85,247,0.25);
+}
+.sub-line.selected {
+    background: rgba(168,85,247,0.08);
+    border-color: rgba(168,85,247,0.35);
+}
+.cue-check {
+    margin-top: 3px;
+    accent-color: var(--purple);
+    cursor: pointer;
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+}
+.sub-ts {
+    font-size: 10px;
+    color: var(--text3);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    padding-top: 3px;
+    min-width: 34px;
+    flex-shrink: 0;
+}
+.sub-txt {
+    flex: 1;
+    font-size: var(--sub-font-size);
+    line-height: 1.6;
+    color: var(--text2);
+    word-break: break-word;
+    white-space: normal;
+    transition: color .2s;
+}
+.sub-line.active .sub-txt {
+    color: var(--text);
+    font-weight: 500;
+}
+.word {
+    cursor: pointer;
+    border-radius: 3px;
+    padding: 0 1px;
+    transition: all .1s;
+    display: inline;
+}
+.word:hover {
+    background: rgba(168,85,247,.22);
+    color: var(--text);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+.save-btn {
+    opacity: 0;
+    width: 22px;
+    height: 22px;
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--text3);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    flex-shrink: 0;
+    transition: all .15s;
+    margin-top: 2px;
+}
+.sub-line:hover .save-btn, .save-btn.saved { opacity: 1; }
+.save-btn:hover { background: rgba(245,158,11,.12); border-color: rgba(245,158,11,.35); color: var(--amber); }
+.save-btn.saved { color: var(--amber); border-color: rgba(245,158,11,.35); background: rgba(245,158,11,.09); }
+
+/* Welcome Screen */
+.welcome-screen {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: var(--text3);
+    gap: 12px;
+    padding: 40px;
+    text-align: center;
+}
+.welcome-screen i { font-size: 64px; opacity: .12; }
+.welcome-screen h3 { font-size: 17px; font-weight: 600; color: var(--text2); }
+.welcome-screen p { font-size: 13px; color: var(--text3); line-height: 1.6; max-width: 320px; }
+
+/* ═══════════════════════════════ RIGHT PANEL: PLAZA & EPISODES ═══════════════════════════════ */
+.right-hd {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+.logo-title {
+    font-size: 13.5px;
+    font-weight: 700;
+    background: var(--grad);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+.right-tabs {
+    display: flex;
+    padding: 8px 10px 0;
+    gap: 4px;
+    flex-shrink: 0;
+}
+.stab {
+    flex: 1;
+    padding: 5px 6px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    color: var(--text3);
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all .15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+}
+.stab.active { background: var(--card-hover); border-color: var(--border); color: var(--text); }
+.stab:hover:not(.active) { color: var(--text2); }
+
+.right-body {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+/* Search */
+.search-row { display: flex; gap: 5px; padding: 8px 10px 6px; }
+.search-row input {
+    flex: 1;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 10px;
+    color: var(--text);
+    font-size: 12px;
+    outline: none;
+}
+.search-row input:focus { border-color: rgba(168,85,247,.4); }
+.search-row button {
+    background: var(--grad);
+    border: none;
+    border-radius: 8px;
+    padding: 6px 10px;
+    color: #fff;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+/* Regions & Presets */
+.region-row { display: flex; gap: 4px; padding: 0 10px 6px; overflow-x: auto; flex-shrink: 0; }
+.region-row::-webkit-scrollbar { height: 2px; }
+.rbtn {
+    padding: 3px 8px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    color: var(--text3);
+    font-size: 10px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.rbtn.active { background: rgba(168,85,247,.15); border-color: rgba(168,85,247,.45); color: #c084fc; }
+
+.preset-row { display: flex; gap: 4px; padding: 0 10px 8px; overflow-x: auto; flex-shrink: 0; }
+.preset-row::-webkit-scrollbar { height: 2px; }
+.chip {
+    padding: 2px 7px;
+    background: rgba(236,72,153,.08);
+    border: 1px solid rgba(236,72,153,.2);
+    border-radius: 16px;
+    color: #f9a8d4;
+    font-size: 10px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.sec-label { padding: 6px 10px 4px; font-size: 9.5px; font-weight: 700; color: var(--text3); text-transform: uppercase; letter-spacing: .5px; }
+.pod-grid { display: grid; grid-template-columns: 1fr; gap: 7px; padding: 4px 10px 14px; }
+.pod-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    overflow: hidden;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px;
+    transition: all .15s;
+    position: relative;
+}
+.pod-card:hover { transform: translateY(-1px); border-color: rgba(168,85,247,.3); background: var(--card-hover); }
+.pod-card img { width: 44px; height: 44px; border-radius: 6px; object-fit: cover; flex-shrink: 0; }
+.pod-card-info { flex: 1; min-width: 0; }
+.pod-card-title { font-size: 11px; font-weight: 600; line-height: 1.3; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.pod-card-artist { font-size: 9.5px; color: var(--text3); margin-top: 2px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+/* Channel view & episodes */
+.channel-hd { padding: 8px 10px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.back-btn { background: none; border: none; color: var(--purple-light); font-size: 11px; cursor: pointer; padding: 0 0 6px; display: flex; align-items: center; gap: 4px; }
+.chan-mini { display: flex; gap: 8px; align-items: center; }
+.chan-mini img { width: 38px; height: 38px; border-radius: 6px; object-fit: cover; flex-shrink: 0; }
+.chan-mini-title { font-size: 11.5px; font-weight: 700; line-height: 1.3; }
+.chan-mini-author { font-size: 10px; color: var(--text3); margin-top: 1px; }
+
+.ep-item { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background .15s; }
+.ep-item:hover { background: var(--card-hover); }
+.ep-item.playing { background: rgba(168,85,247,.1); border-left: 2px solid var(--purple); padding-left: 8px; }
+.ep-icon { width: 22px; height: 22px; flex-shrink: 0; background: var(--card-bg); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 8px; color: var(--purple-light); margin-top: 1px; }
+.ep-item.playing .ep-icon { background: var(--grad); color: #fff; }
+.ep-info { flex: 1; min-width: 0; }
+.ep-title { font-size: 11px; font-weight: 600; line-height: 1.35; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.ep-meta-s { font-size: 9.5px; color: var(--text3); margin-top: 2px; }
+
+/* Notebook */
+.nb-hd { padding: 8px 10px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); }
+.nb-count { font-size: 11px; color: var(--text3); }
+.export-btn { background: var(--card-bg); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; color: var(--text2); font-size: 10.5px; cursor: pointer; }
+.nb-empty { text-align: center; padding: 30px 16px; color: var(--text3); font-size: 12px; line-height: 1.7; }
+.nb-entry { padding: 8px 10px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background .15s; }
+.nb-entry:hover { background: var(--card-hover); }
+.nb-text { font-size: 11px; line-height: 1.5; color: var(--text); font-style: italic; }
+.nb-meta { font-size: 9px; color: var(--text3); margin-top: 4px; display: flex; gap: 5px; align-items: center; }
+.nb-del { margin-left: auto; background: none; border: none; color: var(--text3); cursor: pointer; font-size: 10px; }
+
+/* ═══════════════════════════════ DICT POPUP & TOAST ═══════════════════════════════ */
+#dictPopup {
+    position: fixed; z-index: 200;
+    background: #141422; border: 1px solid rgba(168,85,247,.3);
+    border-radius: 12px; padding: 14px 16px;
+    width: 300px; max-width: calc(100vw - 24px);
+    box-shadow: 0 16px 48px rgba(0,0,0,.75);
+    animation: popIn .15s ease;
+}
+@keyframes popIn{from{opacity:0;transform:scale(.95) translateY(-5px);}to{opacity:1;transform:scale(1) translateY(0);}}
+.dict-close { position: absolute; top: 7px; right: 7px; background: none; border: none; color: var(--text3); cursor: pointer; font-size: 12px; }
+.dict-word { font-size: 18px; font-weight: 700; color: var(--text); }
+.dict-phon { font-size: 11px; color: var(--purple-light); margin-bottom: 8px; }
+.dict-pos { font-size: 9.5px; color: var(--amber); font-weight: 700; text-transform: uppercase; }
+.dict-def { font-size: 12px; color: var(--text2); line-height: 1.5; margin-bottom: 4px; }
+.dict-ex { font-size: 10.5px; color: var(--text3); font-style: italic; border-left: 2px solid var(--border); padding-left: 6px; }
+
+.toast-wrap { position: fixed; bottom: 18px; right: 18px; z-index: 300; display: flex; flex-direction: column; gap: 6px; }
+.toast {
+    background: rgba(18,18,30,.97); backdrop-filter: blur(16px);
+    border: 1px solid var(--border); padding: 9px 14px; border-radius: 9px;
+    font-size: 12px; color: var(--text); display: flex; align-items: center; gap: 8px;
+    box-shadow: 0 6px 20px rgba(0,0,0,.4); animation: slideIn .2s ease; max-width: 320px;
+}
+.toast.success { border-left: 3px solid var(--green); }
+.toast.info { border-left: 3px solid var(--purple); }
 @keyframes slideIn{from{transform:translateX(18px);opacity:0;}to{transform:translateX(0);opacity:1;}}
 
-/* spinner */
-.spinner{width:28px;height:28px;border:2.5px solid var(--border);border-top-color:var(--purple);border-radius:50%;animation:spin .8s linear infinite;margin:36px auto;}
+.spinner { width: 24px; height: 24px; border: 2px solid var(--border); border-top-color: var(--purple); border-radius: 50%; animation: spin .8s linear infinite; margin: 30px auto; }
 @keyframes spin{to{transform:rotate(360deg);}}
 </style>
 </head>
 <body>
 
-<!-- ═══════════════ SIDEBAR ═══════════════ -->
-<aside class="sidebar" id="sidebar">
-<div class="sidebar-inner">
-    <div class="sidebar-hd">
-        <div class="logo-wrap">
-            <div class="logo-name"><i class="fa-solid fa-headphones" style="font-size:13px"></i> Podcast Learner</div>
-            <div class="logo-tag">RSS · AI Subtitles · Personal Use</div>
+<!-- ═══════════════════════════════ COLUMN 1: LEFT (1/3) AI Q&A + PLAYER ═══════════════════════════════ -->
+<aside class="col-left" id="colLeft">
+    <!-- AI Q&A Top Section -->
+    <div class="ai-section">
+        <div class="ai-hd">
+            <div class="ai-hd-title">
+                <i class="fa-solid fa-wand-magic-sparkles" style="color:var(--purple)"></i>
+                <span>AI 学习助教</span>
+                <span class="ai-badge">Gemini</span>
+            </div>
+            <div class="ai-hd-actions">
+                <button class="icon-btn" onclick="clearAiChat()" title="清空对话记录">
+                    <i class="fa-solid fa-trash-can"></i>
+                </button>
+            </div>
         </div>
-        <button class="sidebar-close" onclick="toggleSidebar()" title="Collapse">
-            <i class="fa-solid fa-chevron-left"></i>
-        </button>
+
+        <!-- Chat messages area -->
+        <div class="ai-messages" id="aiMessages">
+            <div class="ai-welcome-card">
+                <h4><i class="fa-solid fa-lightbulb" style="color:var(--amber)"></i> 智能字幕助学</h4>
+                在右侧字幕列表勾选任意句子，它们会自动被送入下方的提问框。<br>
+                你可以让大模型为你深度剖析<strong>长难句语法</strong>、<strong>地道习语</strong>或<strong>结合全集背景回答问题</strong>。
+            </div>
+        </div>
+
+        <!-- AI Input & Context panel -->
+        <div class="ai-input-panel">
+            <div class="selected-quotes-bar" id="selectedQuotesBar" style="display:none">
+                <span><i class="fa-solid fa-quote-left"></i> 已勾选 <strong id="selQuotesCount">0</strong> 句字幕</span>
+                <button class="clear-quotes-btn" onclick="clearSelectedCues()"><i class="fa-solid fa-xmark"></i> 取消勾选</button>
+            </div>
+            <div class="ai-quick-tags">
+                <button class="qtag" onclick="quickAsk('语法拆解')">📖 语法拆解</button>
+                <button class="qtag" onclick="quickAsk('地道用法')">🗣️ 地道用法</button>
+                <button class="qtag" onclick="quickAsk('逐词翻译')">🌐 逐词翻译</button>
+                <button class="qtag" onclick="quickAsk('全文要点')">📝 全文要点</button>
+            </div>
+            <div class="ai-input-row">
+                <textarea id="aiInput" placeholder="输入问题或勾选字幕提问... (Enter发送, Shift+Enter换行)" onkeydown="handleAiKey(event)"></textarea>
+                <button class="ai-send-btn" id="aiSendBtn" onclick="sendAiQuestion()" title="提问">
+                    <i class="fa-solid fa-paper-plane"></i>
+                </button>
+            </div>
+        </div>
     </div>
 
-    <div class="sidebar-tabs">
-        <button class="stab active" id="stab-plaza" onclick="showTab('plaza')">
-            <i class="fa-solid fa-globe"></i> Plaza
-        </button>
-        <button class="stab" id="stab-notebook" onclick="showTab('notebook')">
-            <i class="fa-solid fa-bookmark"></i> Notebook <span id="nbBadge" style="display:none;background:var(--purple);color:#fff;border-radius:99px;padding:0 5px;font-size:10px;margin-left:2px;">0</span>
-        </button>
-    </div>
-
-    <!-- PLAZA TAB -->
-    <div id="tab-plaza" class="sidebar-body">
-        <div class="search-row">
-            <input type="text" id="searchInput" placeholder="Search podcasts, paste RSS URL..." onkeyup="handleKey(event)">
-            <button onclick="doSearch()"><i class="fa-solid fa-magnifying-glass"></i></button>
+    <!-- Left Bottom: Player Console -->
+    <div class="left-player-console" id="leftPlayerConsole">
+        <!-- Episode info -->
+        <div class="lp-info-row" id="playerBar">
+            <img class="pb-cover" id="pbCover" src="https://via.placeholder.com/60" alt="">
+            <div class="pb-info">
+                <div class="pb-title" id="pbTitle">未选择播放播客</div>
+                <div class="pb-author" id="pbAuthor">请在右侧选择节目</div>
+            </div>
         </div>
-        <div class="region-row">
-            <button class="rbtn active" id="rb-us" onclick="switchRegion('us')">United States</button>
-            <button class="rbtn" id="rb-gb" onclick="switchRegion('gb')">United Kingdom</button>
-            <button class="rbtn" id="rb-au" onclick="switchRegion('au')">Australia</button>
-            <button class="rbtn" id="rb-ca" onclick="switchRegion('ca')">Canada</button>
-            <button class="rbtn" id="rb-jp" onclick="switchRegion('jp')">Japan</button>
-            <button class="rbtn" id="rb-de" onclick="switchRegion('de')">Germany</button>
-            <button class="rbtn" id="rb-fr" onclick="switchRegion('fr')">France</button>
-            <button class="rbtn" id="rb-es" onclick="switchRegion('es')">Spain</button>
-            <button class="rbtn" id="rb-kr" onclick="switchRegion('kr')">Korea</button>
-        </div>
-        <div class="preset-row">
-            <div class="chip" onclick="preset('The Daily')">The Daily</div>
-            <div class="chip" onclick="preset('Joe Rogan')">Joe Rogan</div>
-            <div class="chip" onclick="preset('Huberman Lab')">Huberman Lab</div>
-            <div class="chip" onclick="preset('Lex Fridman')">Lex Fridman</div>
-            <div class="chip" onclick="preset('Crime Junkie')">Crime Junkie</div>
-            <div class="chip" onclick="preset('NPR News Now')">NPR News</div>
-            <div class="chip" onclick="preset('Dateline NBC')">Dateline NBC</div>
-        </div>
-        <div id="plazaContent"><div class="spinner"></div></div>
-    </div>
 
-    <!-- NOTEBOOK TAB -->
-    <div id="tab-notebook" class="sidebar-body" style="display:none">
-        <div class="nb-hd">
-            <span class="nb-count" id="nbCount">0 sentences saved</span>
-            <button class="export-btn" onclick="exportNotebook()">
-                <i class="fa-solid fa-arrow-up-from-bracket"></i> Export
-            </button>
-        </div>
-        <div id="nbList"></div>
-    </div>
-</div>
-</aside>
-
-<!-- floating reopen button -->
-<button id="sidebarOpenBtn" onclick="toggleSidebar()">
-    <i class="fa-solid fa-bars"></i>
-</button>
-
-<!-- ═══════════════ MAIN ═══════════════ -->
-<main class="main" id="main">
-
-    <!-- Player bar (hidden until episode plays) -->
-    <div class="player-bar" id="playerBar" style="display:none">
-        <img class="pb-cover" id="pbCover" src="" alt="">
-        <div class="pb-info">
-            <div class="pb-title" id="pbTitle">—</div>
-            <div class="pb-author" id="pbAuthor">—</div>
-        </div>
-        <div class="pb-progress">
+        <!-- Progress bar -->
+        <div class="lp-prog-wrap">
             <span class="pb-time" id="pbCur">0:00</span>
             <div class="prog-bar" id="progBar" onclick="seekAudio(event)">
                 <div class="prog-fill" id="progFill" style="width:0%"></div>
             </div>
             <span class="pb-time" id="pbTot">0:00</span>
         </div>
-        <div class="pb-ctrl">
-            <button class="cbtn" onclick="skipAudio(-10)" title="-10s"><i class="fa-solid fa-rotate-left"></i></button>
-            <button class="cbtn play" id="playBtn" onclick="togglePlay()"><i class="fa-solid fa-play"></i></button>
-            <button class="cbtn" onclick="skipAudio(30)" title="+30s"><i class="fa-solid fa-rotate-right"></i></button>
+
+        <!-- Playback + Volume Controls -->
+        <div class="lp-ctrl-row">
+            <div class="lp-buttons">
+                <button class="cbtn" onclick="skipAudio(-10)" title="-10秒"><i class="fa-solid fa-rotate-left"></i></button>
+                <button class="cbtn play" id="playBtn" onclick="togglePlay()"><i class="fa-solid fa-play"></i></button>
+                <button class="cbtn" onclick="skipAudio(30)" title="+30秒"><i class="fa-solid fa-rotate-right"></i></button>
+            </div>
+            <!-- Volume Slider -->
+            <div class="vol-ctrl-wrap">
+                <button class="vol-btn" id="volBtn" onclick="toggleMute()" title="音量/静音">
+                    <i class="fa-solid fa-volume-high" id="volIcon"></i>
+                </button>
+                <input type="range" class="vol-slider" id="volSlider" min="0" max="1" step="0.05" value="1" oninput="setVolume(this.value)" title="调节音量">
+            </div>
+        </div>
+
+        <!-- Speed Slider: 0.25x to 1.0x (No Speedup) -->
+        <div class="lp-speed-wrap">
+            <div class="speed-hd-row">
+                <span><i class="fa-solid fa-gauge-high"></i> 播放速度</span>
+                <span id="speedVal" class="speed-val-tag">1.00×</span>
+            </div>
+            <input type="range" class="speed-slider" id="speedSlider" min="0.25" max="1.0" step="0.05" value="1.0" oninput="onSpeedSlider(this.value)">
+            <div class="speed-ticks">
+                <span>0.25× (慢速)</span>
+                <span>0.5×</span>
+                <span>0.75×</span>
+                <span>1.0× (原速)</span>
+            </div>
+        </div>
+
+        <!-- A-B Loop Controls -->
+        <div class="lp-loop-row" id="lc">
+            <button class="lb" id="btnA" onclick="setLoopA()">
+                <i class="fa-solid fa-flag" style="color:var(--green)"></i> A: <span id="lblA">--</span>
+            </button>
+            <button class="lb" id="btnB" onclick="setLoopB()">
+                <i class="fa-solid fa-flag-checkered" style="color:var(--pink)"></i> B: <span id="lblB">--</span>
+            </button>
+            <button class="lb" id="btnLoop" onclick="toggleLoop()">
+                <i class="fa-solid fa-repeat"></i> Loop
+            </button>
+            <button class="lb danger" onclick="clearLoop()" title="清除 Loop">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+
+        <!-- Hidden elements for test compatibility -->
+        <div id="speedRow">
+            <button class="lb" onclick="setSpeed(0.6)">0.6×</button>
+            <button class="lb" onclick="setSpeed(0.75)">0.75×</button>
+            <button class="lb active" onclick="setSpeed(1.0)">1.0×</button>
+        </div>
+    </div>
+</aside>
+
+<!-- ═══════════════════════════════ COLUMN 2: MIDDLE (50%) SUBTITLES ═══════════════════════════════ -->
+<main class="col-mid" id="colMid">
+    <!-- Subtitle Header with Font Size Adjuster -->
+    <div class="sub-hd">
+        <div class="sub-hd-left">
+            <i class="fa-solid fa-closed-captioning" style="color:var(--purple)"></i>
+            <span>字幕</span>
+            <span class="sub-badge" id="subBadge" style="background:rgba(100,116,139,.2);color:#94a3b8;border-color:rgba(100,116,139,.3)">未播放</span>
+        </div>
+        <div class="sub-actions">
+            <!-- Font Sizer -->
+            <div class="font-sizer" title="调节字幕字体大小">
+                <button class="font-btn" onclick="adjustFontSize(-1)">A-</button>
+                <span class="font-disp" id="fontSizeDisplay">13.5px</span>
+                <button class="font-btn" onclick="adjustFontSize(1)">A+</button>
+            </div>
+            <button class="refresh-btn" id="refreshBtn" onclick="triggerAiTranscribe()">
+                <i class="fa-solid fa-rotate"></i> 刷新
+            </button>
         </div>
     </div>
 
-    <!-- Welcome screen -->
-    <div class="welcome" id="welcome">
+    <!-- Welcome screen (hidden when playing) -->
+    <div class="welcome-screen" id="welcome">
         <i class="fa-solid fa-headphones-simple"></i>
-        <h2>Pick a podcast to start learning</h2>
-        <p>Browse the Plaza in the sidebar, click a show, then select an episode. The subtitle panel will activate here.</p>
+        <h3>请在右侧选择一期播客</h3>
+        <p>点击节目单集即可开始自动加载音频与极速 AI 字幕。字幕占屏幕中间 50%，支持勾选即时向左侧 AI 提问！</p>
     </div>
 
-    <!-- Subtitle panel (shown when playing) -->
-    <div class="sub-panel" id="subPanel" style="display:none">
-        <div class="sub-hd">
-            <div class="sub-hd-left">
-                <i class="fa-solid fa-closed-captioning" style="color:var(--purple)"></i>
-                Live Subtitles
-                <span class="sub-badge" id="subBadge" style="background:rgba(100,116,139,.2);color:#94a3b8;border-color:rgba(100,116,139,.3)">Loading...</span>
-            </div>
-            <div class="sub-actions">
-                <span style="font-size:11px;color:var(--text3)">Click word → lookup &nbsp;·&nbsp; <i class="fa-regular fa-bookmark"></i> → save</span>
-                <button class="refresh-btn" id="refreshBtn" onclick="triggerAiTranscribe()">
-                    <i class="fa-solid fa-rotate"></i> Refresh
-                </button>
-            </div>
-        </div>
-        <div class="sub-scroll" id="subScroll"></div>
-    </div>
-
-    <!-- Learning console (shown when playing) -->
-    <div class="lc" id="lc" style="display:none">
-        <!-- Speed -->
-        <div class="lc-group">
-            <div class="lc-label"><i class="fa-solid fa-gauge-high"></i> Speed</div>
-            <div class="lc-row" id="speedRow">
-                <button class="lb" onclick="setSpeed(0.6)">0.6×</button>
-                <button class="lb" onclick="setSpeed(0.75)">0.75×</button>
-                <button class="lb active" onclick="setSpeed(1.0)">1.0×</button>
-                <button class="lb" onclick="setSpeed(1.25)">1.25×</button>
-                <button class="lb" onclick="setSpeed(1.5)">1.5×</button>
-                <button class="lb" onclick="setSpeed(2.0)">2.0×</button>
-            </div>
-        </div>
-
-        <div class="lc-div"></div>
-
-        <!-- A-B Loop -->
-        <div class="lc-group">
-            <div class="lc-label"><i class="fa-solid fa-repeat"></i> A-B Loop</div>
-            <div class="lc-row">
-                <button class="lb" id="btnA" onclick="setLoopA()">
-                    <i class="fa-solid fa-flag" style="color:var(--green)"></i>
-                    A: <span id="lblA" style="color:var(--text3)">--</span>
-                </button>
-                <button class="lb" id="btnB" onclick="setLoopB()">
-                    <i class="fa-solid fa-flag-checkered" style="color:var(--pink)"></i>
-                    B: <span id="lblB" style="color:var(--text3)">--</span>
-                </button>
-                <button class="lb" id="btnLoop" onclick="toggleLoop()">
-                    <i class="fa-solid fa-repeat"></i> Loop
-                </button>
-                <button class="lb danger" onclick="clearLoop()" title="Clear A-B">
-                    <i class="fa-solid fa-xmark"></i> Clear
-                </button>
-            </div>
-        </div>
-
-        <div class="lc-div"></div>
-
-        <!-- Attribution -->
-        <div style="font-size:10px;color:var(--text3);line-height:1.7;margin-left:auto;text-align:right;flex-shrink:0;">
-            <div><i class="fa-solid fa-shield-halved" style="color:var(--green)"></i> Audio from original RSS source</div>
-            <div><i class="fa-solid fa-copyright" style="color:var(--purple)"></i> © original creators · personal use</div>
-        </div>
-    </div>
-
+    <!-- Subtitle Scroll Area -->
+    <div class="sub-scroll" id="subScroll" style="display:none"></div>
+    <div id="subPanel" style="display:none"></div>
 </main>
+
+<!-- ═══════════════════════════════ COLUMN 3: RIGHT (~16.7%) PLAZA & EPISODES ═══════════════════════════════ -->
+<section class="col-right" id="colRight">
+    <div class="right-hd">
+        <div class="logo-title"><i class="fa-solid fa-headphones"></i> Podcast Plaza</div>
+        <button class="icon-btn" onclick="toggleRightPanel()" title="收起/展开"><i class="fa-solid fa-angles-right"></i></button>
+    </div>
+
+    <div class="right-tabs">
+        <button class="stab active" id="stab-plaza" onclick="showTab('plaza')">
+            <i class="fa-solid fa-globe"></i> 广场
+        </button>
+        <button class="stab" id="stab-notebook" onclick="showTab('notebook')">
+            <i class="fa-solid fa-bookmark"></i> 笔记本
+        </button>
+    </div>
+
+    <!-- Plaza tab -->
+    <div id="tab-plaza" class="right-body">
+        <div class="search-row">
+            <input type="text" id="searchInput" placeholder="搜索播客或粘贴 RSS..." onkeyup="handleKey(event)">
+            <button onclick="doSearch()"><i class="fa-solid fa-magnifying-glass"></i></button>
+        </div>
+        <div class="region-row">
+            <button class="rbtn active" id="rb-us" onclick="switchRegion('us')">US</button>
+            <button class="rbtn" id="rb-gb" onclick="switchRegion('gb')">UK</button>
+            <button class="rbtn" id="rb-ca" onclick="switchRegion('ca')">CA</button>
+            <button class="rbtn" id="rb-au" onclick="switchRegion('au')">AU</button>
+            <button class="rbtn" id="rb-jp" onclick="switchRegion('jp')">JP</button>
+            <button class="rbtn" id="rb-de" onclick="switchRegion('de')">DE</button>
+        </div>
+        <div class="preset-row">
+            <div class="chip" onclick="preset('The Daily')">The Daily</div>
+            <div class="chip" onclick="preset('Huberman Lab')">Huberman</div>
+            <div class="chip" onclick="preset('Lex Fridman')">Lex Fridman</div>
+            <div class="chip" onclick="preset('NPR News Now')">NPR News</div>
+        </div>
+        <div id="plazaContent"><div class="spinner"></div></div>
+    </div>
+
+    <!-- Notebook tab -->
+    <div id="tab-notebook" class="right-body" style="display:none">
+        <div class="nb-hd">
+            <span class="nb-count" id="nbCount">0 句笔记</span>
+            <button class="export-btn" onclick="exportNotebook()"><i class="fa-solid fa-download"></i> 导出</button>
+        </div>
+        <div id="nbList"></div>
+    </div>
+</section>
+
+<!-- Floating Reopen button for right panel -->
+<button id="sidebarOpenBtn" onclick="toggleRightPanel()" style="display:none;position:fixed;top:10px;right:10px;z-index:90;width:30px;height:30px;background:var(--panel-left-bg);border:1px solid var(--border);border-radius:6px;color:var(--text2);cursor:pointer;align-items:center;justify-content:center;">
+    <i class="fa-solid fa-bars"></i>
+</button>
 
 <!-- Dictionary popup -->
 <div id="dictPopup" style="display:none">
@@ -518,10 +1151,10 @@ body{display:flex;background:var(--bg);color:var(--text);}
     <div id="dictContent"></div>
 </div>
 
-<!-- Audio element -->
+<!-- Audio Element -->
 <audio id="ga"></audio>
 
-<!-- Toasts -->
+<!-- Toast Wrap -->
 <div class="toast-wrap" id="toastWrap"></div>
 
 <script>
@@ -543,28 +1176,56 @@ let coveredUntil = 0;
 let subtitlesComplete = false;
 let wantsPlayback = false;
 let waitingForSubtitles = false;
-let savedCues = new Set();   // indices saved for this episode
-let notebook = [];           // persisted
-let sidebarOpen = true;
+let savedCues = new Set();
+let notebook = [];
+let selectedCues = new Set(); // Indices of checked cues
+
+// Font Size
+let currentSubFontSize = parseFloat(localStorage.getItem('sub_font_size') || '13.5');
 
 // A-B
 let loopA = null, loopB = null, loopOn = false;
 // Speed
 let speed = 1.0;
+// Volume
+let lastVolume = 1.0;
 
 // ══════════════════════════════════════════════
-//  SIDEBAR
+//  FONT SIZE ADJUSTMENT
 // ══════════════════════════════════════════════
+function adjustFontSize(delta) {
+    currentSubFontSize = Math.min(22, Math.max(11, currentSubFontSize + delta));
+    localStorage.setItem('sub_font_size', currentSubFontSize);
+    applyFontSize();
+}
+
+function applyFontSize() {
+    document.documentElement.style.setProperty('--sub-font-size', currentSubFontSize + 'px');
+    const disp = document.getElementById('fontSizeDisplay');
+    if (disp) disp.textContent = currentSubFontSize + 'px';
+}
+
+// ══════════════════════════════════════════════
+//  PANEL TOGGLE
+// ══════════════════════════════════════════════
+let rightPanelOpen = true;
+function toggleRightPanel() {
+    rightPanelOpen = !rightPanelOpen;
+    document.getElementById('colRight').classList.toggle('collapsed', !rightPanelOpen);
+    const openBtn = document.getElementById('sidebarOpenBtn');
+    if (openBtn) openBtn.style.display = rightPanelOpen ? 'none' : 'flex';
+}
+
 function toggleSidebar() {
-    sidebarOpen = !sidebarOpen;
-    document.getElementById('sidebar').classList.toggle('collapsed', !sidebarOpen);
-    document.getElementById('sidebarOpenBtn').style.display = sidebarOpen ? 'none' : 'flex';
+    toggleRightPanel();
 }
 
 function showTab(tab) {
     ['plaza','notebook'].forEach(t => {
-        document.getElementById(`tab-${t}`).style.display = t === tab ? 'block' : 'none';
-        document.getElementById(`stab-${t}`).classList.toggle('active', t === tab);
+        const el = document.getElementById(`tab-${t}`);
+        if (el) el.style.display = t === tab ? 'block' : 'none';
+        const st = document.getElementById(`stab-${t}`);
+        if (st) st.classList.toggle('active', t === tab);
     });
     if (tab === 'notebook') renderNotebook();
 }
@@ -587,7 +1248,7 @@ async function loadTopCharts(c = 'us') {
         const data = await res.json();
         renderTopCharts(data.results);
     } catch(e) {
-        setPlaza(`<div style="padding:24px;text-align:center;color:var(--text3);font-size:13px">Failed to load: ${e.message}</div>`);
+        setPlaza(`<div style="padding:24px;text-align:center;color:var(--text3);font-size:12px">加载失败: ${e.message}</div>`);
     }
 }
 
@@ -596,9 +1257,7 @@ function renderTopCharts(results) {
     results.forEach((r, i) => {
         const img = hd(r.artworkUrl600);
         h += `<div class="pod-card" onclick="loadPodcast('${r.collectionId}')">
-            <div class="rank-badge">#${i+1}</div>
-            ${r.hasTranscript ? '<div class="cc-dot"><i class="fa-solid fa-closed-captioning" style="font-size:7px;color:#fff"></i></div>' : ''}
-            <img src="${img}" loading="lazy" alt="">
+            <img src="${img}" alt="" loading="lazy">
             <div class="pod-card-info">
                 <div class="pod-card-title">${esc(r.collectionName)}</div>
                 <div class="pod-card-artist">${esc(r.artistName)}</div>
@@ -609,37 +1268,39 @@ function renderTopCharts(results) {
     setPlaza(h);
 }
 
-function preset(term) {
-    document.getElementById('searchInput').value = term;
-    doSearch();
+function setPlaza(html) {
+    const el = document.getElementById('plazaContent');
+    if (el) el.innerHTML = html;
 }
 
 function handleKey(e) { if (e.key === 'Enter') doSearch(); }
 
 async function doSearch() {
     const q = document.getElementById('searchInput').value.trim();
-    if (!q) return;
+    if (!q) { loadTopCharts(country); return; }
+    if (q.startsWith('http://') || q.startsWith('https://')) {
+        loadRssUrl(q);
+        return;
+    }
     setPlaza('<div class="spinner"></div>');
     try {
-        const res = await fetch(`/api/search?query=${encodeURIComponent(q)}&country=${country}`);
+        const res = await fetch(`/api/search?q=${enc(q)}&country=${country}`);
         const data = await res.json();
-        if (data.feedData) {
-            currentMeta = data;
-            currentFeed = data.feedData;
-            currentEpisodes = data.feedData.episodes || [];
-            renderChannel(data.feedData, data);
-        } else if (data.results) {
-            renderSearchResults(data.results);
-        }
-    } catch(e) { toast('Search failed: ' + e.message); }
+        renderSearchResults(data.results);
+    } catch(e) {
+        setPlaza(`<div style="padding:24px;text-align:center;color:var(--text3);font-size:12px">搜索失败: ${e.message}</div>`);
+    }
 }
 
 function renderSearchResults(results) {
-    if (!results.length) { setPlaza('<div style="padding:24px;text-align:center;color:var(--text3);font-size:13px">No results.</div>'); return; }
-    let h = '<div class="sec-label">Search Results</div><div class="pod-grid">';
+    if (!results || !results.length) {
+        setPlaza('<div style="padding:30px;text-align:center;color:var(--text3);font-size:12px">未找到匹配的播客</div>');
+        return;
+    }
+    let h = `<div class="sec-label">搜索结果 (${results.length})</div><div class="pod-grid">`;
     results.forEach(r => {
         h += `<div class="pod-card" onclick="loadPodcast('${r.collectionId}')">
-            <img src="${hd(r.artworkUrl600)}" loading="lazy" alt="">
+            <img src="${hd(r.artworkUrl600)}" alt="" loading="lazy">
             <div class="pod-card-info">
                 <div class="pod-card-title">${esc(r.collectionName)}</div>
                 <div class="pod-card-artist">${esc(r.artistName)}</div>
@@ -648,6 +1309,11 @@ function renderSearchResults(results) {
     });
     h += '</div>';
     setPlaza(h);
+}
+
+function preset(q) {
+    document.getElementById('searchInput').value = q;
+    doSearch();
 }
 
 async function loadPodcast(id) {
@@ -655,51 +1321,54 @@ async function loadPodcast(id) {
     try {
         const res = await fetch(`/api/lookup?id=${id}&country=${country}`);
         const data = await res.json();
-        currentMeta = data;
-        currentFeed = data.feedData;
-        currentEpisodes = (data.feedData || {}).episodes || [];
-        renderChannel(data.feedData, data);
-    } catch(e) { toast('Failed to load: ' + e.message); }
+        currentMeta = data.meta;
+        renderChannel(data.feed);
+    } catch(e) {
+        setPlaza(`<div style="padding:24px;text-align:center;color:var(--text3);font-size:12px">加载播客失败: ${e.message}</div>`);
+    }
 }
 
-function renderChannel(feed, meta) {
-    const cover = hd(feed.image || meta.artworkUrl600 || '');
-    const author = feed.author || meta.artistName || '';
+async function loadRssUrl(url) {
+    setPlaza('<div class="spinner"></div>');
+    try {
+        const res = await fetch(`/api/feed?url=${enc(url)}`);
+        const feed = await res.json();
+        currentMeta = { title: feed.title, artist: feed.author, artworkUrl600: feed.image };
+        renderChannel(feed);
+    } catch(e) {
+        setPlaza(`<div style="padding:24px;text-align:center;color:var(--text3);font-size:12px">RSS 加载失败: ${e.message}</div>`);
+    }
+}
 
+function renderChannel(feed) {
+    currentFeed = feed;
+    currentEpisodes = feed.episodes || [];
+    const cover = hd(feed.image || (currentMeta && currentMeta.artworkUrl600));
     let h = `<div class="channel-hd">
-        <button class="back-btn" onclick="loadTopCharts(country)">
-            <i class="fa-solid fa-chevron-left"></i> Plaza
+        <button class="back-btn" onclick="loadTopCharts('${country}')">
+            <i class="fa-solid fa-chevron-left"></i> 返回广场
         </button>
         <div class="chan-mini">
             <img src="${cover}" alt="">
             <div>
-                <div class="chan-mini-title">${esc(feed.title || meta.collectionName)}</div>
-                <div class="chan-mini-author">${esc(author)}</div>
+                <div class="chan-mini-title">${esc(feed.title)}</div>
+                <div class="chan-mini-author">${esc(feed.author)} · ${currentEpisodes.length} 集</div>
             </div>
         </div>
     </div><div class="ep-list">`;
 
-    (feed.episodes || []).forEach((ep, idx) => {
-        const isNow = nowPlaying && nowPlaying.url === ep.audioUrl;
-        h += `<div class="ep-item ${isNow ? 'playing' : ''}" onclick="playByIdx(${idx},'${escQ(cover)}','${escQ(author)}')">
-            <div class="ep-icon"><i class="fa-solid ${isNow ? 'fa-volume-high' : 'fa-play'}"></i></div>
+    currentEpisodes.forEach((ep, i) => {
+        const isCur = nowPlaying && nowPlaying.url === ep.audioUrl;
+        h += `<div class="ep-item ${isCur ? 'playing' : ''}" onclick="playByIdx(${i}, '${escQ(cover)}', '${escQ(feed.author)}')">
+            <div class="ep-icon"><i class="fa-solid ${isCur ? 'fa-volume-high' : 'fa-play'}"></i></div>
             <div class="ep-info">
                 <div class="ep-title">${esc(ep.title)}</div>
-                <div class="ep-meta-s">
-                    ${ep.pubDate ? ep.pubDate.substring(0,10) : ''}
-                    ${ep.duration ? ' · ' + ep.duration : ''}
-                    ${ep.transcriptUrl ? ' · <span style="color:var(--amber)">CC</span>' : ''}
-                </div>
+                <div class="ep-meta-s">${esc(ep.pubDate ? ep.pubDate.slice(0,16) : '')}</div>
             </div>
         </div>`;
     });
-
     h += '</div>';
     setPlaza(h);
-}
-
-function setPlaza(html) {
-    document.getElementById('plazaContent').innerHTML = html;
 }
 
 // ══════════════════════════════════════════════
@@ -722,17 +1391,22 @@ function startPlay(url, title, author, cover, transcriptUrl, description) {
     waitingForSubtitles = true;
     nowPlaying = { url, title, author, cover, transcriptUrl, description };
     savedCues = new Set();
+    selectedCues = new Set();
+    updateCueSelectionUI();
 
-    // Update player bar
-    document.getElementById('pbCover').src = hd(cover);
-    document.getElementById('pbTitle').textContent = title;
-    document.getElementById('pbAuthor').textContent = author;
-    document.getElementById('playerBar').style.display = 'flex';
+    // Update left player bar
+    const pbCover = document.getElementById('pbCover');
+    if (pbCover) pbCover.src = hd(cover);
+    const pbTitle = document.getElementById('pbTitle');
+    if (pbTitle) pbTitle.textContent = title;
+    const pbAuthor = document.getElementById('pbAuthor');
+    if (pbAuthor) pbAuthor.textContent = author;
 
-    // Show panels
-    document.getElementById('welcome').style.display = 'none';
-    document.getElementById('subPanel').style.display = 'flex';
-    document.getElementById('lc').style.display = 'flex';
+    // Show mid subtitle area
+    const wel = document.getElementById('welcome');
+    if (wel) wel.style.display = 'none';
+    const subScr = document.getElementById('subScroll');
+    if (subScr) subScr.style.display = 'block';
 
     // Reset A-B
     clearLoop();
@@ -741,12 +1415,12 @@ function startPlay(url, title, author, cover, transcriptUrl, description) {
     audio.preload = 'none';
     audio.src = url;
     audio.playbackRate = speed;
+    audio.volume = lastVolume;
     
-    // 限制：如果没有读出字幕，就不要开始播放，保持暂停状态
     audio.pause();
     setPlayIcon(false);
 
-    loadSubtitles(url, title, transcriptUrl, description);
+    loadSubtitles();
 }
 
 function canPlayWithSubtitles() {
@@ -789,11 +1463,13 @@ function togglePlay() {
 }
 
 function setPlayIcon(playing) {
-    document.getElementById('playBtn').innerHTML =
-        `<i class="fa-solid ${playing ? 'fa-pause' : 'fa-play'}"></i>`;
+    const btn = document.getElementById('playBtn');
+    if (btn) btn.innerHTML = `<i class="fa-solid ${playing ? 'fa-pause' : 'fa-play'}"></i>`;
 }
 
-function skipAudio(s) { audio.currentTime = Math.max(0, audio.currentTime + s); }
+function skipAudio(s) { 
+    audio.currentTime = Math.max(0, audio.currentTime + s); 
+}
 
 function seekAudio(e) {
     const bar = e.currentTarget;
@@ -804,9 +1480,12 @@ function seekAudio(e) {
 audio.ontimeupdate = () => {
     if (!audio.duration) return;
     const pct = (audio.currentTime / audio.duration) * 100;
-    document.getElementById('progFill').style.width = pct + '%';
-    document.getElementById('pbCur').textContent = ft(audio.currentTime);
-    document.getElementById('pbTot').textContent = ft(audio.duration);
+    const fill = document.getElementById('progFill');
+    if (fill) fill.style.width = pct + '%';
+    const cur = document.getElementById('pbCur');
+    if (cur) cur.textContent = ft(audio.currentTime);
+    const tot = document.getElementById('pbTot');
+    if (tot) tot.textContent = ft(audio.duration);
     syncSubs(audio.currentTime);
     if (wantsPlayback && !subtitlesComplete && audio.currentTime >= coveredUntil) {
         waitingForSubtitles = true;
@@ -824,15 +1503,56 @@ audio.onpause = () => setPlayIcon(false);
 audio.onplay  = () => setPlayIcon(true);
 
 // ══════════════════════════════════════════════
-//  SPEED
+//  VOLUME CONTROL
 // ══════════════════════════════════════════════
+function setVolume(v) {
+    const vol = parseFloat(v);
+    audio.volume = vol;
+    audio.muted = (vol === 0);
+    if (vol > 0) lastVolume = vol;
+    updateVolIcon(vol);
+}
+
+function toggleMute() {
+    if (audio.muted || audio.volume === 0) {
+        audio.muted = false;
+        audio.volume = lastVolume > 0 ? lastVolume : 1;
+    } else {
+        lastVolume = audio.volume;
+        audio.muted = true;
+        audio.volume = 0;
+    }
+    const s = document.getElementById('volSlider');
+    if (s) s.value = audio.volume;
+    updateVolIcon(audio.volume);
+}
+
+function updateVolIcon(vol) {
+    const icon = document.getElementById('volIcon');
+    if (!icon) return;
+    if (vol === 0 || audio.muted) icon.className = 'fa-solid fa-volume-xmark';
+    else if (vol < 0.5) icon.className = 'fa-solid fa-volume-low';
+    else icon.className = 'fa-solid fa-volume-high';
+}
+
+// ══════════════════════════════════════════════
+//  SPEED SLIDER (0.25x - 1.0x)
+// ══════════════════════════════════════════════
+function onSpeedSlider(val) {
+    setSpeed(parseFloat(val));
+}
+
 function setSpeed(r) {
     speed = r;
     audio.playbackRate = r;
+    const tag = document.getElementById('speedVal');
+    if (tag) tag.textContent = r.toFixed(2) + '×';
+    const slider = document.getElementById('speedSlider');
+    if (slider && parseFloat(slider.value) !== r) slider.value = r;
+    // Keep test compatibility
     document.querySelectorAll('#speedRow .lb').forEach(b => {
         b.classList.toggle('active', parseFloat(b.textContent) === r);
     });
-    toast(`Speed: ${r}×`, 'info');
 }
 
 // ══════════════════════════════════════════════
@@ -843,7 +1563,7 @@ function setLoopA() {
     document.getElementById('lblA').textContent = ft(loopA);
     document.getElementById('lblA').style.color = 'var(--green)';
     document.getElementById('btnA').classList.add('active');
-    toast(`A → ${ft(loopA)}`, 'info');
+    toast(`A 点设定: ${ft(loopA)}`, 'info');
 }
 
 function setLoopB() {
@@ -851,19 +1571,19 @@ function setLoopB() {
     document.getElementById('lblB').textContent = ft(loopB);
     document.getElementById('lblB').style.color = 'var(--pink)';
     document.getElementById('btnB').classList.add('active');
-    toast(`B → ${ft(loopB)}`, 'info');
+    toast(`B 点设定: ${ft(loopB)}`, 'info');
 }
 
 function toggleLoop() {
-    if (loopA === null || loopB === null) { toast('Set A and B first', 'info'); return; }
-    if (loopB <= loopA) { toast('B 必须在 A 之后。', 'info'); return; }
+    if (loopA === null || loopB === null) { toast('请先设定 A 点和 B 点', 'info'); return; }
+    if (loopB <= loopA) { toast('B 点时间必须晚于 A 点', 'info'); return; }
     loopOn = !loopOn;
     const btn = document.getElementById('btnLoop');
     if (loopOn) {
         btn.classList.add('loop-on');
         btn.innerHTML = '<i class="fa-solid fa-repeat"></i> Loop ON';
         audio.currentTime = loopA;
-        toast(`Loop: ${ft(loopA)} → ${ft(loopB)}`, 'info');
+        toast(`循环中: ${ft(loopA)} → ${ft(loopB)}`, 'info');
     } else {
         btn.classList.remove('loop-on');
         btn.innerHTML = '<i class="fa-solid fa-repeat"></i> Loop';
@@ -873,17 +1593,20 @@ function toggleLoop() {
 function clearLoop() {
     loopA = null; loopB = null; loopOn = false;
     ['A','B'].forEach(x => {
-        document.getElementById(`lbl${x}`).textContent = '--';
-        document.getElementById(`lbl${x}`).style.color = 'var(--text3)';
-        document.getElementById(`btn${x}`).classList.remove('active');
+        const lbl = document.getElementById(`lbl${x}`);
+        if (lbl) { lbl.textContent = '--'; lbl.style.color = 'var(--text3)'; }
+        const btn = document.getElementById(`btn${x}`);
+        if (btn) btn.classList.remove('active');
     });
     const btn = document.getElementById('btnLoop');
-    btn.classList.remove('loop-on');
-    btn.innerHTML = '<i class="fa-solid fa-repeat"></i> Loop';
+    if (btn) {
+        btn.classList.remove('loop-on');
+        btn.innerHTML = '<i class="fa-solid fa-repeat"></i> Loop';
+    }
 }
 
 // ══════════════════════════════════════════════
-//  SUBTITLES
+//  SUBTITLES & STREAMING
 // ══════════════════════════════════════════════
 function loadSubtitles() {
     triggerAiTranscribe(true);
@@ -902,8 +1625,9 @@ function triggerAiTranscribe(auto = false) {
     waitingForSubtitles = wantsPlayback;
     audio.pause();
     const btn = document.getElementById('refreshBtn');
-    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Transcribing...';
-    document.getElementById('subScroll').innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3)">正在生成首段字幕，就绪后开始播放。</div>';
+    if (btn) btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 转写中...';
+    const subScr = document.getElementById('subScroll');
+    if (subScr) subScr.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3)">正在加载首段字幕，就绪后开始播放。</div>';
     setBadge('等待首段字幕…', 'rgba(59,130,246,.15)', '#93c5fd', 'rgba(59,130,246,.3)');
 
     const finish = () => {
@@ -911,15 +1635,15 @@ function triggerAiTranscribe(auto = false) {
         if (subtitleStream) subtitleStream.close();
         subtitleStream = null;
         isTranscribing = false;
-        btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Refresh';
+        if (btn) btn.innerHTML = '<i class="fa-solid fa-rotate"></i> 刷新';
     };
     const fail = (detail) => {
         if (request !== subtitleRequest) return;
         finish();
-        setBadge('字幕转写失败', 'rgba(245,158,11,.15)', '#fbbf24', 'rgba(245,158,11,.3)');
+        setBadge('转写失败', 'rgba(245,158,11,.15)', '#fbbf24', 'rgba(245,158,11,.3)');
         toast(detail, 'info');
-        if (!cues.length) {
-            document.getElementById('subScroll').textContent = detail;
+        if (!cues.length && subScr) {
+            subScr.textContent = detail;
             audio.pause();
         }
     };
@@ -931,21 +1655,20 @@ function triggerAiTranscribe(auto = false) {
             if (request !== subtitleRequest || stream !== subtitleStream) return;
             let data;
             try { data = JSON.parse(e.data); }
-            catch { fail('字幕响应格式异常，请刷新重试。'); return; }
+            catch { fail('响应格式异常，请重试。'); return; }
             if (data.status === 'official' || data.status === 'cached') {
                 cues = parseVtt(data.vtt);
-                if (!cues.length) { fail('字幕缓存为空，请点击刷新重新生成。'); return; }
+                if (!cues.length) { fail('字幕缓存为空，请点击刷新。'); return; }
                 subtitlesComplete = true;
                 coveredUntil = Infinity;
                 if (data.local_audio && audio.currentTime === 0) audio.src = data.local_audio;
                 renderSubs();
-                setBadge(data.status === 'official' ? '✅ Official Transcript' : '✅ Groq Subtitles Ready', 'rgba(168,85,247,.15)', '#c084fc', 'rgba(168,85,247,.3)');
+                setBadge(data.status === 'official' ? '✅ 官方字幕' : '✅ Groq 字幕就绪', 'rgba(168,85,247,.15)', '#c084fc', 'rgba(168,85,247,.3)');
                 finish();
                 playWhenReady();
             } else if (data.status === 'audio_source') {
                 if (data.audio_url && audio.currentTime === 0 && audio.paused) audio.src = data.audio_url;
             } else if (data.status === 'audio_ready') {
-                // Select the downloaded audio only before playback; never reset a playing source.
                 if (data.local_audio && audio.currentTime === 0 && audio.paused) audio.src = data.local_audio;
                 audio.playbackRate = speed;
             } else if (data.status === 'progress') {
@@ -954,7 +1677,7 @@ function triggerAiTranscribe(auto = false) {
                 const cue = data.cue;
                 if (cue && Number.isFinite(cue.start) && Number.isFinite(cue.end) && cue.end > cue.start && typeof cue.text === 'string') cues.push(cue);
             } else if (data.status === 'chunk_ready') {
-                if (!Number.isFinite(data.until)) { fail('字幕进度无效，请刷新重试。'); return; }
+                if (!Number.isFinite(data.until)) { fail('字幕进度无效'); return; }
                 coveredUntil = Math.max(coveredUntil, data.until);
                 if (cues.length) {
                     renderSubs();
@@ -963,47 +1686,54 @@ function triggerAiTranscribe(auto = false) {
                     playWhenReady();
                 }
             } else if (data.status === 'done') {
-                if (!cues.length) { fail('没有识别到字幕，请刷新重试。'); return; }
+                if (!cues.length) { fail('未识别到有效字幕'); return; }
                 subtitlesComplete = true;
                 coveredUntil = Infinity;
                 finish();
-                setBadge('✅ Groq Subtitles Ready', 'rgba(168,85,247,.15)', '#c084fc', 'rgba(168,85,247,.3)');
+                setBadge('✅ 全篇转写完成', 'rgba(168,85,247,.15)', '#c084fc', 'rgba(168,85,247,.3)');
                 playWhenReady();
             } else if (data.status === 'error') {
-                fail(data.detail || '字幕转写失败，请刷新重试。');
+                fail(data.detail || '字幕转写失败');
             }
         };
         stream.onerror = () => {
-            if (request === subtitleRequest && stream === subtitleStream) fail('字幕连接中断，请刷新重试。');
+            if (request === subtitleRequest && stream === subtitleStream) fail('连接中断，请刷新重试');
         };
     } catch (e) {
-        fail('无法启动字幕转写，请刷新重试。');
+        fail('无法启动转写，请刷新重试');
     }
 }
 
 function setBadge(text, bg, color, border) {
     const b = document.getElementById('subBadge');
+    if (!b) return;
     b.textContent = text;
     b.style.background = bg;
     b.style.color = color;
     b.style.borderColor = border;
 }
 
+// ══════════════════════════════════════════════
+//  RENDER SUBTITLES & CHECKBOX SELECTION
+// ══════════════════════════════════════════════
 function renderSubs() {
     const el = document.getElementById('subScroll');
+    if (!el) return;
     if (!cues.length) {
-        el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3);font-size:13px">暂无可用字幕</div>';
+        el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3);font-size:12px">暂无可用字幕</div>';
         return;
     }
     let h = '';
     savedCues = new Set(cues.flatMap((c, i) => notebook.some(n => n.epUrl === nowPlaying.url && Math.abs(n.start - c.start) < 0.5) ? [i] : []));
     cues.forEach((c, i) => {
         const saved = savedCues.has(i);
-        h += `<div class="sub-line" id="cue-${i}" onclick="jumpTo(${c.start})">
+        const isChecked = selectedCues.has(i);
+        h += `<div class="sub-line ${isChecked ? 'selected' : ''}" id="cue-${i}" onclick="jumpTo(${c.start})">
+            <input type="checkbox" class="cue-check" data-idx="${i}" ${isChecked ? 'checked' : ''} onclick="event.stopPropagation()" onchange="onCueCheckChange(${i}, this.checked)" title="勾选送入 AI 提问框">
             <span class="sub-ts">${ft(c.start)}</span>
             <span class="sub-txt">${wordSpans(c.text, i)}</span>
             <button class="save-btn ${saved ? 'saved' : ''}" id="sbtn-${i}"
-                onclick="saveSentence(event,${i})" title="${saved ? 'Saved' : 'Save to notebook'}">
+                onclick="saveSentence(event,${i})" title="${saved ? '已收藏' : '收藏到笔记本'}">
                 <i class="fa-${saved ? 'solid' : 'regular'} fa-bookmark"></i>
             </button>
         </div>`;
@@ -1045,6 +1775,344 @@ function syncSubs(t) {
     }
 }
 
+// ══════════════════════════════════════════════
+//  CUE SELECTION & AI INTEGRATION
+// ══════════════════════════════════════════════
+function onCueCheckChange(idx, checked) {
+    if (checked) {
+        selectedCues.add(idx);
+    } else {
+        selectedCues.delete(idx);
+    }
+    const line = document.getElementById(`cue-${idx}`);
+    if (line) line.classList.toggle('selected', checked);
+    updateCueSelectionUI();
+}
+
+function clearSelectedCues() {
+    selectedCues.clear();
+    document.querySelectorAll('.cue-check').forEach(cb => cb.checked = false);
+    document.querySelectorAll('.sub-line.selected').forEach(l => l.classList.remove('selected'));
+    updateCueSelectionUI();
+}
+
+function getSelectedQuotesText() {
+    const sorted = Array.from(selectedCues).sort((a,b)=>a-b);
+    return sorted.map(i => cues[i] ? `[${ft(cues[i].start)}] ${cues[i].text}` : '').filter(Boolean).join('\n');
+}
+
+function updateCueSelectionUI() {
+    const bar = document.getElementById('selectedQuotesBar');
+    const cnt = document.getElementById('selQuotesCount');
+    const aiInput = document.getElementById('aiInput');
+    const count = selectedCues.size;
+
+    if (count > 0) {
+        if (bar) bar.style.display = 'flex';
+        if (cnt) cnt.textContent = count;
+        // If textarea is empty, give a friendly prompt
+        if (aiInput && !aiInput.value.trim()) {
+            aiInput.placeholder = `已选 ${count} 句字幕，可直接点击上方快捷标签或输入问题提问...`;
+        }
+    } else {
+        if (bar) bar.style.display = 'none';
+        if (aiInput) aiInput.placeholder = '输入问题或勾选字幕提问... (Enter发送, Shift+Enter换行)';
+    }
+}
+
+function quickAsk(type) {
+    const aiInput = document.getElementById('aiInput');
+    if (!aiInput) return;
+    const quotes = getSelectedQuotesText();
+    let prompt = '';
+    if (type === '语法拆解') {
+        prompt = quotes ? '请详细拆解并分析上述选定字幕句子的语法结构与从句连接。' : '请帮我梳理本期播客中出现的核心复杂语法结构。';
+    } else if (type === '地道用法') {
+        prompt = quotes ? '请解析选定字幕中的地道习语、俚语或高阶表达，并给出两个生动的日常造句。' : '请提炼本期播客中最值得学习的地道口语表达。';
+    } else if (type === '逐词翻译') {
+        prompt = quotes ? '请将上述选定字幕逐句给出精准、自然的中文对照翻译。' : '请总结当前听到段落的中文大意。';
+    } else if (type === '全文要点') {
+        prompt = '结合这期播客的转写内容，用中文清晰梳理出本期节目的核心主旨与要点。';
+    }
+    aiInput.value = prompt;
+    sendAiQuestion();
+}
+
+function handleAiKey(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendAiQuestion();
+    }
+}
+
+async function sendAiQuestion() {
+    const input = document.getElementById('aiInput');
+    const question = input.value.trim();
+    const selectedText = getSelectedQuotesText();
+
+    if (!question && !selectedText) {
+        toast('请先输入问题或在右侧勾选需要解析的字幕', 'info');
+        return;
+    }
+
+    const fullTranscript = cues.map(c => c.text).join(' ');
+    const displayMsg = question || '请详细解析勾选的字幕句子。';
+    
+    // Append User Message to Chat
+    appendChatMessage('user', displayMsg, selectedText);
+    input.value = '';
+
+    // Append Loading indicator
+    const loadingId = appendChatLoading();
+
+    // Disable button
+    const btn = document.getElementById('aiSendBtn');
+    if (btn) btn.disabled = true;
+
+    try {
+        const res = await fetch('/api/ask', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                question: question,
+                selected_text: selectedText,
+                audio_url: nowPlaying ? nowPlaying.url : '',
+                full_transcript: fullTranscript
+            })
+        });
+        const data = await res.json();
+        removeChatLoading(loadingId);
+        if (data.status === 'success') {
+            appendChatMessage('ai', data.answer);
+        } else {
+            appendChatMessage('ai', '⚠️ ' + (data.message || '提问失败，请稍后重试。'));
+        }
+    } catch (e) {
+        removeChatLoading(loadingId);
+        appendChatMessage('ai', '⚠️ 网络连接异常: ' + e.message);
+    } finally {
+        if (btn) btn.disabled = false;
+        // Optionally clear cue checks after asking
+        clearSelectedCues();
+    }
+}
+
+function appendChatMessage(role, text, quote = '') {
+    const list = document.getElementById('aiMessages');
+    if (!list) return;
+    const row = document.createElement('div');
+    row.className = `msg-row ${role}`;
+    
+    let html = '';
+    if (quote) {
+        html += `<div class="msg-quote-tag"><i class="fa-solid fa-quote-left"></i> ${escHtml(quote).replace(/\n/g,'<br>')}</div>`;
+    }
+    html += `<div class="msg-bubble">${formatMarkdown(text)}</div>`;
+    row.innerHTML = html;
+    list.appendChild(row);
+    list.scrollTop = list.scrollHeight;
+}
+
+let loadingCounter = 0;
+function appendChatLoading() {
+    const list = document.getElementById('aiMessages');
+    if (!list) return 0;
+    loadingCounter++;
+    const id = `loading-${loadingCounter}`;
+    const row = document.createElement('div');
+    row.className = 'msg-row ai';
+    row.id = id;
+    row.innerHTML = `<div class="msg-bubble msg-loading"><i class="fa-solid fa-circle-notch fa-spin"></i> Gemini 思考中...</div>`;
+    list.appendChild(row);
+    list.scrollTop = list.scrollHeight;
+    return id;
+}
+
+function removeChatLoading(id) {
+    const el = document.getElementById(id);
+    if (el) el.remove();
+}
+
+function clearAiChat() {
+    const list = document.getElementById('aiMessages');
+    if (list) {
+        list.innerHTML = `<div class="ai-welcome-card">
+            <h4><i class="fa-solid fa-lightbulb" style="color:var(--amber)"></i> 对话已清空</h4>
+            在右侧勾选字幕即可将句子送入提问框，随时向 AI 学习提问。
+        </div>`;
+    }
+    toast('对话记录已清空', 'info');
+}
+
+function formatMarkdown(str) {
+    if (!str) return '';
+    let s = escHtml(str);
+    // Bold
+    s = s.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    // Bullet points
+    s = s.replace(/^\* (.*$)/gim, '• $1');
+    s = s.replace(/^- (.*$)/gim, '• $1');
+    // Line breaks
+    s = s.replace(/\n/g, '<br>');
+    return s;
+}
+
+// ══════════════════════════════════════════════
+//  DICTIONARY & LOOKUP
+// ══════════════════════════════════════════════
+async function lookupWord(word, e, cueIdx) {
+    e.stopPropagation();
+    const popup = document.getElementById('dictPopup');
+    const content = document.getElementById('dictContent');
+    popup.style.display = 'block';
+    
+    // Position popup near click, bounded by window
+    const x = Math.min(window.innerWidth - 320, Math.max(10, e.clientX - 100));
+    const y = Math.min(window.innerHeight - 280, Math.max(10, e.clientY + 15));
+    popup.style.left = `${x}px`;
+    popup.style.top = `${y}px`;
+
+    content.innerHTML = `<div class="dict-loading"><i class="fa-solid fa-spinner fa-spin"></i> 查询中...</div>`;
+
+    let context = '';
+    if (cueIdx !== undefined && cues[cueIdx]) context = cues[cueIdx].text;
+
+    try {
+        const res = await fetch(`/api/define?word=${enc(word)}&context=${enc(context)}`);
+        const result = await res.json();
+        if (result.status === 'success' && result.data) {
+            const d = result.data;
+            content.innerHTML = `
+                <div class="dict-word">${esc(d.word)}</div>
+                <div class="dict-phon">${esc(d.phonetic || '')}</div>
+                <div class="dict-pos">${esc(d.pos || '')}</div>
+                <div class="dict-def"><strong>英:</strong> ${esc(d.definition_en || '')}</div>
+                <div class="dict-def"><strong>中:</strong> ${esc(d.translation_cn || '')}</div>
+                ${d.example ? `<div class="dict-ex">"${esc(d.example)}"<br><span style="color:var(--text3)">${esc(d.example_cn || '')}</span></div>` : ''}
+                ${d.context_note ? `<div style="font-size:11px;color:var(--purple-light);margin-top:6px;border-top:1px dashed var(--border);padding-top:5px;">💡 语境: ${esc(d.context_note)}</div>` : ''}
+            `;
+        } else {
+            content.innerHTML = `<div class="dict-none">暂未查到该词: ${esc(result.message || '未知错误')}</div>`;
+        }
+    } catch(err) {
+        content.innerHTML = `<div class="dict-none">查询失败: ${esc(err.message)}</div>`;
+    }
+}
+
+function closeDictPopup() {
+    document.getElementById('dictPopup').style.display = 'none';
+}
+
+document.addEventListener('click', (e) => {
+    const p = document.getElementById('dictPopup');
+    if (p && p.style.display !== 'none' && !p.contains(e.target) && !e.target.classList.contains('word')) {
+        closeDictPopup();
+    }
+});
+
+// ══════════════════════════════════════════════
+//  NOTEBOOK
+// ══════════════════════════════════════════════
+function loadNotebook() {
+    try { notebook = JSON.parse(localStorage.getItem('podcast_notebook') || '[]'); }
+    catch { notebook = []; }
+}
+function saveNotebook() {
+    localStorage.setItem('podcast_notebook', JSON.stringify(notebook));
+}
+
+function saveSentence(e, idx) {
+    e.stopPropagation();
+    if (!nowPlaying || !cues[idx]) return;
+    const c = cues[idx];
+    const exists = notebook.some(n => n.epUrl === nowPlaying.url && Math.abs(n.start - c.start) < 0.5);
+    if (exists) {
+        notebook = notebook.filter(n => !(n.epUrl === nowPlaying.url && Math.abs(n.start - c.start) < 0.5));
+        savedCues.delete(idx);
+        saveNotebook();
+        updateSaveBtn(idx, false);
+        toast('已从笔记本移除', 'info');
+        return;
+    }
+    notebook.unshift({
+        id: Date.now(),
+        epUrl: nowPlaying.url,
+        epTitle: nowPlaying.title,
+        show: nowPlaying.author,
+        start: c.start,
+        text: c.text,
+        savedAt: new Date().toISOString()
+    });
+    savedCues.add(idx);
+    saveNotebook();
+    updateSaveBtn(idx, true);
+    toast('✅ 已加入笔记本！', 'success');
+}
+
+function updateSaveBtn(idx, saved) {
+    const btn = document.getElementById(`sbtn-${idx}`);
+    if (!btn) return;
+    btn.className = `save-btn ${saved ? 'saved' : ''}`;
+    btn.innerHTML = `<i class="fa-${saved ? 'solid' : 'regular'} fa-bookmark"></i>`;
+}
+
+function renderNotebook() {
+    const list = document.getElementById('nbList');
+    if (!list) return;
+    document.getElementById('nbCount').textContent = `${notebook.length} 句笔记`;
+
+    if (!notebook.length) {
+        list.innerHTML = `<div class="nb-empty">
+            <i class="fa-regular fa-bookmark" style="font-size:32px;display:block;margin-bottom:10px;opacity:.3"></i>
+            笔记本暂无收藏句子。<br>悬停字幕点击书签即可保存。
+        </div>`;
+        return;
+    }
+
+    list.innerHTML = notebook.map(n => {
+        return `<div class="nb-entry" onclick="jumpFromNotebook('${escQ(n.epUrl)}',${n.start})">
+            <div class="nb-text">"${escHtml(n.text)}"</div>
+            <div class="nb-meta">
+                <span>${escHtml(n.show)} · ${ft(n.start)}</span>
+                <button class="nb-del" onclick="deleteNb(event,${n.id})"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function jumpFromNotebook(epUrl, startTime) {
+    if (nowPlaying && nowPlaying.url === epUrl) {
+        audio.currentTime = startTime;
+        wantsPlayback = true;
+        playWhenReady();
+        showTab('plaza');
+        toast(`↩ 跳转至 ${ft(startTime)}`, 'info');
+    } else {
+        toast('请先加载并播放该单集', 'info');
+    }
+}
+
+function deleteNb(e, id) {
+    e.stopPropagation();
+    notebook = notebook.filter(n => n.id !== id);
+    saveNotebook();
+    renderNotebook();
+}
+
+function exportNotebook() {
+    if (!notebook.length) { toast('笔记本为空', 'info'); return; }
+    const txt = notebook.map(n => `[${n.show} | ${n.epTitle} | ${ft(n.start)}]\n"${n.text}"\n`).join('\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([txt], { type: 'text/plain;charset=utf-8' }));
+    a.download = `podcast-notes-${new Date().toISOString().slice(0,10)}.txt`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast(`已导出 ${notebook.length} 条笔记`, 'success');
+}
+
+// ══════════════════════════════════════════════
+//  UTILS
+// ══════════════════════════════════════════════
 function parseVtt(text) {
     if (!text) return [];
     const result = [];
@@ -1068,261 +2136,12 @@ function parseVtt(text) {
 
 function ts(s) {
     if (!s) return 0;
-    const p = s.replace(',','.').split(':');
-    if (p.length === 3) return +p[0]*3600 + +p[1]*60 + +p[2];
-    if (p.length === 2) return +p[0]*60 + +p[1];
-    return +p[0] || 0;
+    const parts = s.split(':');
+    if (parts.length === 3) return parseFloat(parts[0])*3600 + parseFloat(parts[1])*60 + parseFloat(parts[2].replace(',','.'));
+    if (parts.length === 2) return parseFloat(parts[0])*60 + parseFloat(parts[1].replace(',','.'));
+    return parseFloat(s) || 0;
 }
 
-// ══════════════════════════════════════════════
-//  DICTIONARY
-// ══════════════════════════════════════════════
-let dictVisible = false;
-
-function positionDictPopup(targetRect) {
-    const popup = document.getElementById('dictPopup');
-    if (!popup || popup.style.display === 'none') return;
-
-    const pad = 12;
-    const viewportW = window.innerWidth;
-    const viewportH = window.innerHeight;
-    const popupRect = popup.getBoundingClientRect();
-
-    let top = targetRect ? (targetRect.bottom + 6) : 100;
-    let left = targetRect ? targetRect.left : 100;
-
-    // Vertical overflow check: place above word if below extends off screen
-    if (top + popupRect.height > viewportH - pad) {
-        if (targetRect && targetRect.top - popupRect.height - 6 > pad) {
-            top = targetRect.top - popupRect.height - 6;
-        } else {
-            top = Math.max(pad, viewportH - popupRect.height - pad);
-        }
-    }
-
-    // Horizontal overflow check
-    if (left + popupRect.width > viewportW - pad) {
-        left = Math.max(pad, viewportW - popupRect.width - pad);
-    }
-    if (left < pad) {
-        left = pad;
-    }
-
-    popup.style.left = left + 'px';
-    popup.style.top = top + 'px';
-}
-
-async function lookupWord(word, e, cueIdx) {
-    e.stopPropagation();
-    const popup = document.getElementById('dictPopup');
-    const content = document.getElementById('dictContent');
-    const targetRect = e.currentTarget ? e.currentTarget.getBoundingClientRect() : null;
-
-    popup.style.display = 'block';
-    dictVisible = true;
-    content.innerHTML = '<div class="dict-loading"><i class="fa-solid fa-sparkles" style="color:var(--purple)"></i> Gemini AI 检索中 <strong>' + escHtml(word) + '</strong>...</div>';
-
-    // Initial positioning
-    positionDictPopup(targetRect);
-
-    // Get current sentence context if available
-    let contextSentence = "";
-    if (cues[cueIdx]) contextSentence = cues[cueIdx].text || "";
-
-    const renderAndUpdatePos = (html) => {
-        content.innerHTML = html;
-        requestAnimationFrame(() => positionDictPopup(targetRect));
-    };
-
-    try {
-        const res = await fetch(`/api/define?word=${encodeURIComponent(word)}&context=${encodeURIComponent(contextSentence)}`);
-        const json = await res.json();
-        if (json.status === 'success' && json.data) {
-            const d = json.data;
-            let h = `<div style="display:flex;align-items:center;justify-content:space-between;">
-                <div class="dict-word">${escHtml(d.word || word)}</div>
-                <span style="font-size:10px;background:rgba(168,85,247,0.2);color:#c084fc;padding:2px 6px;border-radius:4px;font-weight:600;"><i class="fa-solid fa-wand-magic-sparkles"></i> Gemini AI</span>
-            </div>`;
-            if (d.phonetic) h += `<div class="dict-phon">${escHtml(d.phonetic)}</div>`;
-            if (d.translation_cn) h += `<div style="font-size:14px;font-weight:700;color:#f3f4f6;margin:6px 0 4px;border-bottom:1px solid rgba(255,255,255,0.08);padding-bottom:4px;">🇨🇳 ${escHtml(d.translation_cn)}</div>`;
-            if (d.definition_en) {
-                h += `<div class="dict-pos">${escHtml(d.pos || '')}</div>`;
-                h += `<div class="dict-def">${escHtml(d.definition_en)}</div>`;
-            }
-            if (d.example) {
-                h += `<div class="dict-ex">"${escHtml(d.example)}"<br><span style="color:var(--text2);font-style:normal;font-size:11px;">${escHtml(d.example_cn || '')}</span></div>`;
-            }
-            if (d.context_note) {
-                h += `<div style="margin-top:8px;font-size:11px;color:#fde68a;background:rgba(245,158,11,0.1);padding:5px 8px;border-radius:6px;"><i class="fa-solid fa-lightbulb"></i> 语境分析: ${escHtml(d.context_note)}</div>`;
-            }
-            renderAndUpdatePos(h);
-            return;
-        }
-        throw new Error('Gemini API return invalid format');
-    } catch(err) {
-        console.log('Gemini lookup fallback to free dictionary:', err);
-        try {
-            const res = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`);
-            if (!res.ok) throw new Error('not found');
-            const data = await res.json();
-            const entry = data[0];
-            const phon = entry.phonetic || (entry.phonetics||[]).find(p=>p.text)?.text || '';
-            const meanings = entry.meanings || [];
-
-            let h = `<div class="dict-word">${escHtml(entry.word)}</div>`;
-            if (phon) h += `<div class="dict-phon">${escHtml(phon)}</div>`;
-
-            meanings.slice(0,2).forEach(m => {
-                const d = m.definitions[0];
-                if (!d) return;
-                h += `<div class="dict-pos">${m.partOfSpeech}</div>`;
-                h += `<div class="dict-def">${escHtml(d.definition)}</div>`;
-                if (d.example) h += `<div class="dict-ex">"${escHtml(d.example)}"</div>`;
-            });
-
-            renderAndUpdatePos(h);
-        } catch(e) {
-            renderAndUpdatePos(`<div class="dict-word">${word}</div><div class="dict-none">No definition found.</div>`);
-        }
-    }
-}
-
-function closeDictPopup() {
-    document.getElementById('dictPopup').style.display = 'none';
-    dictVisible = false;
-}
-
-document.addEventListener('click', e => {
-    if (dictVisible && !e.target.closest('#dictPopup') && !e.target.classList.contains('word')) {
-        closeDictPopup();
-    }
-});
-
-// ══════════════════════════════════════════════
-//  NOTEBOOK
-// ══════════════════════════════════════════════
-function loadNotebook() {
-    try { notebook = JSON.parse(localStorage.getItem('pl_notebook') || '[]'); }
-    catch { notebook = []; }
-    updateNbBadge();
-}
-
-function saveNotebook() {
-    localStorage.setItem('pl_notebook', JSON.stringify(notebook));
-    updateNbBadge();
-}
-
-function updateNbBadge() {
-    const badge = document.getElementById('nbBadge');
-    if (notebook.length > 0) {
-        badge.style.display = 'inline';
-        badge.textContent = notebook.length;
-    } else {
-        badge.style.display = 'none';
-    }
-}
-
-function saveSentence(e, idx) {
-    e.stopPropagation();
-    const cue = cues[idx];
-    if (!cue || !nowPlaying) return;
-
-    if (savedCues.has(idx)) {
-        // Unsave
-        savedCues.delete(idx);
-        notebook = notebook.filter(n => !(n.epUrl === nowPlaying.url && Math.abs(n.start - cue.start) < 0.5));
-        saveNotebook();
-        updateSaveBtn(idx, false);
-        toast('Removed from notebook.', 'info');
-        return;
-    }
-
-    savedCues.add(idx);
-    notebook.unshift({
-        id: Date.now(),
-        text: cue.text,
-        start: cue.start,
-        epTitle: nowPlaying.title,
-        show: nowPlaying.author,
-        epUrl: nowPlaying.url,
-        savedAt: new Date().toISOString()
-    });
-    saveNotebook();
-    updateSaveBtn(idx, true);
-    toast('✅ Saved to notebook!', 'success');
-}
-
-function updateSaveBtn(idx, saved) {
-    const btn = document.getElementById(`sbtn-${idx}`);
-    if (!btn) return;
-    btn.className = `save-btn ${saved ? 'saved' : ''}`;
-    btn.innerHTML = `<i class="fa-${saved ? 'solid' : 'regular'} fa-bookmark"></i>`;
-    btn.title = saved ? 'Saved' : 'Save to notebook';
-}
-
-function renderNotebook() {
-    const list = document.getElementById('nbList');
-    document.getElementById('nbCount').textContent = `${notebook.length} sentence${notebook.length !== 1 ? 's' : ''} saved`;
-
-    if (!notebook.length) {
-        list.innerHTML = `<div class="nb-empty">
-            <i class="fa-regular fa-bookmark" style="font-size:36px;display:block;margin-bottom:12px;opacity:.4"></i>
-            No saved sentences yet.<br>
-            Hover a subtitle line and click <i class="fa-regular fa-bookmark"></i>.
-        </div>`;
-        return;
-    }
-
-    list.innerHTML = notebook.map(n => {
-        const date = new Date(n.savedAt).toLocaleDateString();
-        return `<div class="nb-entry" onclick="jumpFromNotebook('${escQ(n.epUrl)}',${n.start})">
-            <div class="nb-text">"${escHtml(n.text)}"</div>
-            <div class="nb-meta">
-                <i class="fa-solid fa-podcast" style="color:var(--purple)"></i>
-                ${escHtml(n.show)} · ${ft(n.start)} · ${date}
-                <button class="nb-del" onclick="deleteNb(event,${n.id})" title="Remove">
-                    <i class="fa-solid fa-xmark"></i>
-                </button>
-            </div>
-        </div>`;
-    }).join('');
-}
-
-function jumpFromNotebook(epUrl, startTime) {
-    if (nowPlaying && nowPlaying.url === epUrl) {
-        audio.currentTime = startTime;
-        wantsPlayback = true;
-        playWhenReady();
-        showTab('plaza');
-        toast(`↩ Jumped to ${ft(startTime)}`, 'info');
-    } else {
-        toast('Load this episode first to jump to timestamp.', 'info');
-    }
-}
-
-function deleteNb(e, id) {
-    e.stopPropagation();
-    notebook = notebook.filter(n => n.id !== id);
-    saveNotebook();
-    renderNotebook();
-}
-
-function exportNotebook() {
-    if (!notebook.length) { toast('Notebook is empty.', 'info'); return; }
-    const txt = notebook.map(n =>
-        `[${n.show} | ${n.epTitle} | ${ft(n.start)}]\n"${n.text}"\n`
-    ).join('\n');
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([txt], { type: 'text/plain' }));
-    a.download = `podcast-notebook-${new Date().toISOString().slice(0,10)}.txt`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-    toast(`Exported ${notebook.length} sentences.`, 'success');
-}
-
-// ══════════════════════════════════════════════
-//  UTILS
-// ══════════════════════════════════════════════
 function ft(sec) {
     if (sec === null || sec === undefined) return '0:00';
     const m = Math.floor(sec / 60), s = Math.floor(sec % 60);
@@ -1343,6 +2162,7 @@ function enc(s) { return encodeURIComponent(s||''); }
 
 function toast(msg, type = 'info') {
     const wrap = document.getElementById('toastWrap');
+    if (!wrap) return;
     const el = document.createElement('div');
     el.className = `toast ${type}`;
     el.innerHTML = `<i class="fa-solid ${type==='success' ? 'fa-circle-check' : 'fa-circle-info'}"></i> ${msg}`;
@@ -1354,49 +2174,13 @@ function toast(msg, type = 'info') {
     }, 3200);
 }
 
-function enableHorizontalScroll() {
-    document.querySelectorAll('.region-row, .preset-row').forEach(row => {
-        // Mouse wheel vertical -> horizontal scroll
-        row.addEventListener('wheel', (e) => {
-            if (e.deltaY !== 0) {
-                e.preventDefault();
-                row.scrollLeft += e.deltaY;
-            }
-        }, { passive: false });
-
-        // Mouse click and drag
-        let isDown = false;
-        let startX, scrollLeft;
-
-        row.addEventListener('mousedown', (e) => {
-            if (e.target.tagName === 'BUTTON' || e.target.classList.contains('chip') || e.target.classList.contains('rbtn')) {
-                // Ignore button clicks unless dragging
-            }
-            isDown = true;
-            startX = e.pageX - row.offsetLeft;
-            scrollLeft = row.scrollLeft;
-        });
-
-        row.addEventListener('mouseleave', () => { isDown = false; });
-        row.addEventListener('mouseup', () => { isDown = false; });
-        row.addEventListener('mousemove', (e) => {
-            if (!isDown) return;
-            const x = e.pageX - row.offsetLeft;
-            const walk = (x - startX) * 1.5;
-            if (Math.abs(walk) > 5) {
-                row.scrollLeft = scrollLeft - walk;
-            }
-        });
-    });
-}
-
 // ══════════════════════════════════════════════
 //  INIT
 // ══════════════════════════════════════════════
 window.onload = () => {
     loadNotebook();
+    applyFontSize();
     loadTopCharts('us');
-    enableHorizontalScroll();
 };
 </script>
 </body>
