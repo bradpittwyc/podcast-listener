@@ -8,7 +8,7 @@ import unittest
 import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, AsyncMock
 
 from fastapi.testclient import TestClient
 
@@ -321,6 +321,57 @@ class TranscriptionTests(unittest.TestCase):
         self.assertEqual(result.status_code, 206)
         self.assertEqual(result.content, b"234")
         get.assert_not_called()
+
+    def test_failure_checkpoint_resumes_failed_chunk_and_key_rotation(self):
+        _, audio, vtt = stt.cache_paths(self.cache, self.url)
+        audio.write_bytes(b"audio")
+        checkpoint_path = vtt.with_suffix('.progress.json')
+
+        def chunks(audio_path, work_dir, stopped, start_offset=0):
+            for offset in range(int(start_offset), 90, 30):
+                path = Path(work_dir) / f'{offset}.wav'
+                path.write_bytes(b'audio')
+                yield {'status':'chunk', 'path':path, 'offset':offset, 'duration':30}
+
+        def first_attempt(path, key, *args):
+            if path.stem == '30':
+                raise stt.TranscriptionError('Temporary error')
+            return [{'start':0,'end':20,'text':path.stem}]
+
+        with patch.dict(os.environ, {'GROQ_API_KEY':'key-one','GROQ_API_KEY_2':'key-two'}), patch.object(stt, 'local_audio_chunks', side_effect=chunks):
+            with patch.object(stt, 'groq_segments', side_effect=first_attempt):
+                failed = list(stt.transcript_events(self.url, '', False, self.cache))
+            self.assertEqual(failed[-1]['status'], 'error')
+            self.assertEqual(stt.read_checkpoint(checkpoint_path)['until'], 30)
+            self.assertFalse(vtt.exists())
+            with patch.object(stt, 'groq_segments', return_value=[{'start':0,'end':20,'text':'resumed'}]) as groq:
+                resumed = list(stt.transcript_events(self.url, '', False, self.cache))
+            self.assertEqual(groq.call_args_list[0].args[1], 'key-two')
+            self.assertEqual([call.args[0].stem for call in groq.call_args_list], ['30','60'])
+            self.assertEqual(resumed[0]['status'], 'resumed')
+            self.assertEqual(resumed[-1]['status'], 'done')
+            self.assertFalse(checkpoint_path.exists())
+            self.assertIn('00:00:00.000', vtt.read_text())
+            self.assertIn('00:01:00.000', vtt.read_text())
+
+    def test_corrupt_checkpoint_is_ignored(self):
+        path = self.cache / 'broken.progress.json'
+        path.write_text('{"version":1,"until":30,"next_chunk":1,"cues":[{"start":0,"end":99,"text":"bad"}]}')
+        self.assertEqual(stt.read_checkpoint(path)['until'], 0)
+
+    def test_qa_requires_complete_transcript_and_awaits_full_context(self):
+        client = Mock()
+        client.aio.models.generate_content = AsyncMock(return_value=Mock(text='Answer'))
+        payload = {'question':'Explain', 'audio_url':self.url, 'full_transcript':'x' * 30000 + ' END_OF_EPISODE'}
+        with patch.object(app,'gemini_client',client), patch.object(app,'CACHE_DIR',str(self.cache)):
+            api = TestClient(app.app)
+            rejected = api.post('/api/ask', json=payload)
+            self.assertEqual(rejected.status_code,409)
+            client.aio.models.generate_content.assert_not_called()
+            accepted = api.post('/api/ask', json={**payload,'transcript_complete':True})
+        self.assertEqual(accepted.json()['status'],'success')
+        client.aio.models.generate_content.assert_awaited_once()
+        self.assertIn(payload['full_transcript'],client.aio.models.generate_content.call_args.kwargs['contents'])
 
 
 if __name__ == "__main__":

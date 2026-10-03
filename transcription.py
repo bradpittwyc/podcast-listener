@@ -20,6 +20,30 @@ _locks = [threading.Lock() for _ in range(32)]
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 
+class TranscriptionError(RuntimeError):
+    def __init__(self, detail, retryable=True):
+        super().__init__(detail)
+        self.retryable = retryable
+
+
+def read_checkpoint(path):
+    empty = {"until": 0.0, "next_chunk": 0, "cues": []}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        until, index, cues = data["until"], data["next_chunk"], data["cues"]
+        if data.get("version") != 1 or not isinstance(until, (int, float)) or not math.isfinite(until) or until <= 0:
+            return empty
+        if type(index) is not int or index < 1 or not isinstance(cues, list):
+            return empty
+        for cue in cues:
+            start, end = cue["start"], cue["end"]
+            if not math.isfinite(start) or not math.isfinite(end) or not 0 <= start < end <= until + 0.001 or not isinstance(cue["text"], str):
+                return empty
+        return {"until": until, "next_chunk": index, "cues": cues}
+    except (OSError, ValueError, KeyError, TypeError):
+        return empty
+
+
 def chunk_seconds(offset):
     if offset < 300:
         return min(30, 300 - offset)
@@ -86,8 +110,8 @@ def download_audio(audio_url, path, proxies, stopped, on_data=None):
             temporary.unlink(missing_ok=True)
 
 
-def local_audio_chunks(audio_path, work_dir, stopped):
-    offset = 0.0
+def local_audio_chunks(audio_path, work_dir, stopped, start_offset=0.0):
+    offset = start_offset
     while not stopped.is_set():
         length = chunk_seconds(offset)
         chunk = Path(work_dir) / f"chunk-{round(offset * 16000)}.wav"
@@ -108,7 +132,7 @@ def local_audio_chunks(audio_path, work_dir, stopped):
             return
 
 
-def remote_audio_chunks(audio_url, audio_path, work_dir, proxies, stopped):
+def remote_audio_chunks(audio_url, audio_path, work_dir, proxies, stopped, start_offset=0.0):
     """Tee one HTTP download to the original cache and a streaming PCM decoder.
 
     Decode and download keep running while Groq processes an earlier WAV chunk.
@@ -156,7 +180,15 @@ def remote_audio_chunks(audio_url, audio_path, work_dir, proxies, stopped):
 
     def decode():
         try:
-            samples, index = 0, 0
+            samples, index = round(start_offset * 16000), 0
+            # If there is no complete audio cache, re-fetch/decode the prefix but
+            # skip its PCM; previously completed chunks are never sent to Groq again.
+            remaining = samples * 2
+            while remaining and not cancelled.is_set():
+                part = process.stdout.read(min(64 * 1024, remaining))
+                if not part:
+                    raise RuntimeError("音频长度短于已保存的断点，请重新生成字幕。")
+                remaining -= len(part)
             while not cancelled.is_set():
                 offset = samples / 16000
                 needed = round(chunk_seconds(offset) * 16000) * 2
@@ -216,7 +248,7 @@ def remote_audio_chunks(audio_url, audio_path, work_dir, proxies, stopped):
                 # A completed download may already exist, in which case seeking is cheap.
                 if downloaded.is_set() and result.get("complete") and result.get("decoded_chunks", 0) == 0:
                     yield {"status": "audio_ready"}
-                    yield from local_audio_chunks(audio_path, work_dir, stopped)
+                    yield from local_audio_chunks(audio_path, work_dir, stopped, start_offset)
                     return
                 raise RuntimeError("此音频无法流式解码或连接已中断，请检查音频源后重试。")
             # Confirm the HTTP request really ended; an interrupted file is not EOF.
@@ -264,7 +296,7 @@ def groq_segments(chunk_path, api_key, proxies, stopped):
         if not response.ok:
             status = response.status_code
             response.close()
-            raise RuntimeError(f"Groq 转写失败（HTTP {status}），请检查密钥、额度或网络。")
+            raise TranscriptionError(f"Groq 转写失败（HTTP {status}），请检查密钥、额度或网络。", retryable=status == 429 or status >= 500)
         try:
             data = response.json()
         finally:
@@ -282,7 +314,7 @@ def groq_api_keys():
     return list(dict.fromkeys(values))
 
 
-def alternating_transcriptions(chunks, api_keys, proxies, stopped):
+def alternating_transcriptions(chunks, api_keys, proxies, stopped, start_index=0):
     """One worker per key, bounded lookahead, and results in episode order."""
     cancel = threading.Event()
     capacity = threading.Semaphore(len(api_keys))
@@ -330,7 +362,7 @@ def alternating_transcriptions(chunks, api_keys, proxies, stopped):
                 item["path"].unlink(missing_ok=True)
 
     def dispatch():
-        index = 0
+        index = start_index
         try:
             while not signal.is_set():
                 if not capacity.acquire(timeout=0.2):
@@ -402,10 +434,14 @@ def alternating_transcriptions(chunks, api_keys, proxies, stopped):
 def transcript_events(audio_url, transcript_url, force_refresh, cache_dir, proxies=None, stopped=None):
     stopped = stopped if stopped is not None else threading.Event()
     key, audio_path, vtt_path = cache_paths(cache_dir, audio_url)
+    checkpoint_path = Path(cache_dir) / f"{key}.progress.json"
     lock = _locks[int(key[:8], 16) % len(_locks)]
     while not lock.acquire(timeout=0.2):
         if stopped.is_set():
             return
+        if force_refresh:
+            checkpoint_path.unlink(missing_ok=True)
+            vtt_path.unlink(missing_ok=True)
     try:
         if stopped.is_set():
             return
@@ -426,21 +462,26 @@ def transcript_events(audio_url, transcript_url, force_refresh, cache_dir, proxi
 
         api_keys = groq_api_keys()
         if not api_keys:
-            raise RuntimeError("未配置 GROQ_API_KEY；请配置密钥后刷新字幕，字幕就绪后播放。")
+            raise TranscriptionError("未配置 GROQ_API_KEY；请配置密钥后刷新字幕，字幕就绪后播放。", retryable=False)
         if not shutil.which("ffmpeg"):
-            raise RuntimeError("找不到 FFmpeg；请安装并加入 PATH 后重启服务。")
+            raise TranscriptionError("找不到 FFmpeg；请安装并加入 PATH 后重启服务。", retryable=False)
+
+        checkpoint = read_checkpoint(checkpoint_path)
+        resume_at, chunk_index = checkpoint["until"], checkpoint["next_chunk"]
+        if resume_at:
+            yield {"status": "resumed", "until": resume_at, "cues": checkpoint["cues"]}
 
         # Start decoding incoming bytes immediately; never wait for the full download.
         with tempfile.TemporaryDirectory(prefix="groq-", dir=cache_dir) as work_dir:
             if force_refresh or not audio_path.exists() or not audio_path.stat().st_size:
                 yield {"status": "progress", "detail": "正在边下载边切片，首段字幕就绪后播放。"}
                 yield {"status": "audio_source", "audio_url": "/api/audio?url=" + requests.utils.quote(audio_url, safe="")}
-                chunks = lambda pipeline_stopped: remote_audio_chunks(audio_url, audio_path, work_dir, proxies, pipeline_stopped)
+                chunks = lambda pipeline_stopped: remote_audio_chunks(audio_url, audio_path, work_dir, proxies, pipeline_stopped, resume_at)
             else:
                 yield {"status": "audio_ready", "local_audio": f"/cache/{key}.mp3"}
-                chunks = lambda pipeline_stopped: local_audio_chunks(audio_path, work_dir, pipeline_stopped)
-            cues = []
-            results = alternating_transcriptions(chunks, api_keys, proxies, stopped)
+                chunks = lambda pipeline_stopped: local_audio_chunks(audio_path, work_dir, pipeline_stopped, resume_at)
+            cues = list(checkpoint["cues"])
+            results = alternating_transcriptions(chunks, api_keys, proxies, stopped, start_index=chunk_index)
             try:
                 for item in results:
                     if stopped.is_set():
@@ -454,6 +495,7 @@ def transcript_events(audio_url, transcript_url, force_refresh, cache_dir, proxi
                     offset, duration, segments = item["offset"], item["duration"], item["segments"]
                     if segments is None or stopped.is_set():
                         return
+                    new_cues = []
                     for segment in segments:
                         text = str(segment.get("text", "")).strip()
                         start, end = float(segment.get("start", 0)), float(segment.get("end", 0))
@@ -463,7 +505,13 @@ def transcript_events(audio_url, transcript_url, force_refresh, cache_dir, proxi
                         if end <= start:
                             continue
                         cue = {"start": start + offset, "end": end + offset, "text": text}
-                        cues.append(cue)
+                        new_cues.append(cue)
+                    cues.extend(new_cues)
+                    chunk_index += 1
+                    # Persist before announcing completion, including silent chunks.
+                    atomic_write(checkpoint_path, json.dumps({"version": 1, "until": offset + duration,
+                                 "next_chunk": chunk_index, "cues": cues}, ensure_ascii=False))
+                    for cue in new_cues:
                         yield {"status": "cue", "cue": cue}
                     yield {"status": "chunk_ready", "until": offset + duration}
             finally:
@@ -473,11 +521,12 @@ def transcript_events(audio_url, transcript_url, force_refresh, cache_dir, proxi
             if stopped.is_set():
                 return
             atomic_write(vtt_path, to_vtt(cues))
+            checkpoint_path.unlink(missing_ok=True)
             yield {"status": "done"}
     except Exception as exc:
         # Avoid returning request URLs or authorization information in errors.
         detail = str(exc) if isinstance(exc, RuntimeError) else "字幕转写失败，请检查网络或音频后重试。"
-        yield {"status": "error", "detail": detail}
+        yield {"status": "error", "detail": detail, "retryable": getattr(exc, "retryable", True)}
     finally:
         lock.release()
 
@@ -512,7 +561,7 @@ def stream_with_heartbeat(events_factory):
             try:
                 event = messages.get(timeout=15)
             except queue.Empty:
-                yield ": keep-alive\n\n"
+                yield 'data: {"status": "heartbeat"}\n\n'
                 continue
             if event is None:
                 return

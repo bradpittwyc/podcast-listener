@@ -25,6 +25,7 @@
     --text3: #475569;
     --border: rgba(255,255,255,0.08);
     --sub-font-size: 13.5px;
+    --panel-header-height: 52px;
 }
 *{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",Helvetica,Arial,sans-serif;}
 html,body{height:100%;overflow:hidden;}
@@ -143,10 +144,11 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
     overflow: hidden;
 }
 .left-hd {
+    height: var(--panel-header-height);
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 12px 14px;
+    padding: 0 14px;
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
     background: rgba(13,13,24,0.7);
@@ -260,7 +262,7 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
     position: relative;
 }
 .pod-card:hover { transform: translateY(-1px); border-color: rgba(168,85,247,.3); background: var(--card-hover); }
-.pod-card img { width: 44px; height: 44px; border-radius: 6px; object-fit: cover; flex-shrink: 0; }
+.pod-card img { width: 44px; height: 44px; border-radius: 6px; object-fit: contain; background:var(--card-bg); flex-shrink: 0; }
 .pod-card-info { flex: 1; min-width: 0; }
 .pod-card-title { font-size: 11px; font-weight: 600; line-height: 1.3; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .pod-card-artist { font-size: 9.5px; color: var(--text3); margin-top: 2px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
@@ -269,7 +271,8 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
 .channel-hd { padding: 8px 10px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .back-btn { background: none; border: none; color: var(--purple-light); font-size: 11px; cursor: pointer; padding: 0 0 6px; display: flex; align-items: center; gap: 4px; }
 .chan-mini { display: flex; gap: 8px; align-items: center; }
-.chan-mini img { width: 38px; height: 38px; border-radius: 6px; object-fit: cover; flex-shrink: 0; }
+.chan-mini img { width: 38px; height: 38px; border-radius: 6px; object-fit: contain; background:var(--card-bg); flex-shrink: 0; }
+.chan-mini > div { flex:1;min-width:0;overflow-wrap:anywhere; }
 .chan-mini-title { font-size: 11.5px; font-weight: 700; line-height: 1.3; }
 .chan-mini-author { font-size: 10px; color: var(--text3); margin-top: 1px; }
 
@@ -485,7 +488,7 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
 
 /* ═══════════════════════════════ MIDDLE PANEL: SUBTITLES (50%) ═══════════════════════════════ */
 .sub-hd {
-    height: 46px;
+    height: var(--panel-header-height);
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -680,7 +683,8 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
     overflow: hidden;
 }
 .ai-hd {
-    padding: 12px 16px;
+    height: var(--panel-header-height);
+    padding: 0 16px;
     border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
@@ -740,14 +744,18 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
     gap: 12px;
 }
 .ai-welcome-card {
+    position: relative;
     background: rgba(168,85,247,0.06);
     border: 1px dashed rgba(168,85,247,0.3);
     border-radius: 12px;
-    padding: 14px;
+    padding: 14px 40px 14px 14px;
     font-size: 12px;
     line-height: 1.6;
     color: var(--text2);
 }
+.welcome-close { position:absolute; top:8px; right:8px; width:24px; height:24px; border:0; border-radius:5px; background:transparent; color:var(--text2); font-size:20px; cursor:pointer; }
+.welcome-close:hover { color:var(--text); background:var(--card-hover); }
+.qtag:disabled { opacity:.4; cursor:not-allowed; }
 .ai-welcome-card h4 {
     font-size: 13px;
     color: #fff;
@@ -937,8 +945,121 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
 .spinner { width: 24px; height: 24px; border: 2px solid var(--border); border-top-color: var(--purple); border-radius: 50%; animation: spin .8s linear infinite; margin: 30px auto; }
 @keyframes spin{to{transform:rotate(360deg);}}
 </style>
+<style>
+.settings-footer{flex-shrink:0;padding:10px;border-top:1px solid var(--border)}
+.settings-footer button{width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--card-bg);color:var(--text2);cursor:pointer;text-align:left}
+.settings-footer button:hover{background:var(--card-hover);color:var(--text)}
+.col-left.collapsed .settings-footer{display:none}
+#settingsDialog{margin:auto;width:min(440px,calc(100vw - 32px));padding:24px;border:1px solid var(--border);border-radius:14px;background:var(--panel-right-bg);color:var(--text)}
+#settingsDialog::backdrop{background:rgba(0,0,0,.65)}
+.settings-heading{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.settings-heading button{border:0;background:transparent;color:var(--text2);font-size:24px;cursor:pointer}
+.settings-note{font-size:12px;color:var(--text2);line-height:1.7;margin-bottom:16px}
+#settingsDialog label{display:block;font-size:13px;margin:14px 0 6px}
+#settingsDialog input{width:100%;background:var(--card-bg);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text);outline:none}
+#settingsDialog input:focus{border-color:var(--purple)}
+#settingsStatus{min-height:32px;font-size:12px;color:var(--text2);padding-top:12px}
+#saveSettingsBtn{width:100%;padding:10px;border:0;border-radius:8px;background:var(--grad);color:white;cursor:pointer}
+#saveSettingsBtn:disabled{opacity:.5;cursor:wait}
+.mid-player-console,.ai-input-panel{min-height:var(--footer-height,0px)}
+.ai-input-panel{justify-content:flex-end;padding-bottom:28px}
+.ai-input-row textarea{min-width:0}
+@media(max-width:1180px){
+    body{height:100dvh}
+    .col-left,.col-mid,.col-right{height:100%;max-width:none}
+    .col-left{width:23%;min-width:0}
+    .col-mid{min-width:0}
+    .col-right{width:29%;min-width:0}
+    .ai-section{height:100%;min-height:0}
+    .left-hd,.ai-hd,.sub-hd{padding:0 10px}
+    .logo-title,.ai-hd-title{font-size:12px;gap:4px}
+    .mp-ctrl-row,.mp-left{flex-wrap:wrap;gap:8px;min-width:0}
+    .mid-player-console{padding:10px;gap:8px}
+    .mp-left{flex:1 1 100%}
+    .vol-ctrl-wrap{margin-left:0;padding:2px 6px}
+    .mp-speed-wrap{padding:4px 8px}
+    .cbtn,.lb,.font-btn,.refresh-btn,.vol-btn{min-height:40px;min-width:40px}
+    .qtag,.rbtn{min-height:34px}
+    .ep-item{min-height:60px}
+    .sub-scroll{padding:12px}
+    .sub-txt{font-size:max(var(--sub-font-size),16px)}
+    .search-row input,.ai-input-row textarea{font-size:16px;min-width:0;width:0}
+    .region-row,.preset-row{flex-wrap:wrap}
+    .ai-input-panel{padding:14px 12px 28px}
+    .ai-input-row{gap:5px}
+    .ai-send-btn{flex-shrink:0}
+    .ai-quick-tags{flex-wrap:wrap;overflow:visible}
+    .settings-footer button{min-height:44px}
+    .col-left.collapsed ~ .col-mid .sub-scroll{padding-bottom:16px}
+}
+@media(max-width:820px){
+    .col-left{width:22%}
+    .col-right{width:30%}
+    .left-hd .logo-title{font-size:11px}
+    .ai-hd-title{flex-wrap:wrap;gap:2px}
+    .sub-hd-left{gap:4px;font-size:12px}
+    .sub-actions{gap:4px}
+    .font-disp{display:none}
+    .sub-badge{max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .sub-hd{flex-wrap:wrap;height:auto;min-height:var(--panel-header-height);gap:4px;padding:6px 8px}
+    .sub-actions{margin-left:auto}
+    .font-btn{min-width:30px}
+    .left-tabs{padding:8px 4px 0}
+    .search-row{padding:8px 4px 6px}
+    .pod-card{padding:6px;gap:6px}
+    .pod-card img{width:32px;height:32px}
+    .settings-footer{padding:6px}
+    .settings-footer button{font-size:11px;padding:8px}
+}
+.phone-toolbar,.phone-scrim{display:none}
+@media(max-width:600px){
+    body{display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:44px minmax(0,1.4fr) minmax(0,1fr);height:100dvh}
+    .phone-toolbar{display:flex;grid-row:1;align-items:center;justify-content:space-between;padding:0 14px;border-bottom:1px solid var(--border);background:var(--panel-left-bg);font-size:14px;font-weight:600}
+    .phone-toolbar button{height:40px;min-width:44px;border:0;background:transparent;color:var(--purple-light);font-size:14px}
+    .col-mid{grid-row:2;width:100%;height:100%;border-right:0;min-height:0}
+    .col-right{grid-row:3;width:100%;height:100%;min-height:0;border-top:1px solid var(--border)}
+    .col-left{position:fixed;top:44px;bottom:0;left:0;width:min(340px,88vw);height:calc(100dvh - 44px);z-index:92;box-shadow:12px 0 40px rgba(0,0,0,.5)}
+    .col-left.collapsed{display:none!important}
+    .col-left:not(.collapsed) ~ .phone-scrim{display:block;position:fixed;inset:44px 0 0;z-index:91;border:0;background:rgba(0,0,0,.6)}
+    .left-hd .logo-title{font-size:14px}
+    .pod-card img{width:44px;height:44px}
+    .sub-hd{min-height:44px;padding:2px 14px;flex-wrap:nowrap}
+    .sub-hd-left{min-width:0}
+    #sidebarOpenBtn,.col-left.collapsed ~ .col-mid #sidebarOpenBtn{display:none!important}
+    .sub-badge{max-width:90px}
+    .font-btn,.refresh-btn{min-height:36px;min-width:30px}
+    .sub-scroll{padding:8px 14px}
+    .sub-line{padding:8px 4px;gap:6px}
+    .sub-txt{font-size:max(var(--sub-font-size),15px)}
+    .mid-player-console,.ai-input-panel{min-height:0!important}
+    .mid-player-console{padding:6px 14px 8px;gap:5px}
+    .mp-ctrl-row{gap:4px}
+    .mp-left{flex:1 1 100%;gap:6px;justify-content:space-between}
+    .vol-ctrl-wrap{display:none}
+    .mp-speed-wrap{padding:2px 6px;gap:4px}
+    .speed-slider{width:64px}
+    .mp-right{margin-left:auto}
+    .lb{min-height:30px;min-width:30px;padding:4px 7px}
+    .ai-hd{height:38px;padding:0 14px}
+    .ai-hd-title{font-size:13px;flex-wrap:nowrap}
+    .ai-input-panel{padding:8px 14px max(24px,env(safe-area-inset-bottom));gap:6px}
+    .ai-quick-tags{flex-wrap:nowrap;overflow-x:auto}
+    .qtag{min-height:30px;padding:4px 7px}
+    .ai-input-row textarea{height:52px}
+    .ai-send-btn{height:52px}
+    .ai-messages{padding:10px 14px}
+    .welcome-screen p{font-size:12px}
+    .welcome-screen i{font-size:36px;margin-bottom:10px}
+}
+@media(max-width:600px) and (max-height:600px){
+    body{grid-template-rows:44px minmax(0,1fr) minmax(160px,1fr)}
+    .mid-player-console .mp-right{display:none}
+    .ai-input-panel{padding-bottom:12px}
+}
+</style>
 </head>
 <body>
+<header class="phone-toolbar"><button onclick="expandSidebar()" aria-label="打开播客列表">☰ 播客</button><span>播客学伴</span><button onclick="openSettings()">设置</button></header>
 
 <!-- ═══════════════════════════════ COLUMN 1: LEFT (~25vw) PLAZA & EPISODES + PLAYER ═══════════════════════════════ -->
 <aside class="col-left" id="colLeft">
@@ -993,7 +1114,20 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
         </div>
     </div>
 
+    <div class="settings-footer"><button onclick="openSettings()"><i class="fa-solid fa-gear"></i> 设置 · API Key</button></div>
 </aside>
+<button class="phone-scrim" onclick="collapseSidebar()" aria-label="关闭播客列表"></button>
+<dialog id="settingsDialog" aria-labelledby="settingsTitle" oncancel="closeSettings()">
+    <form onsubmit="saveApiSettings(event)">
+        <div class="settings-heading"><h3 id="settingsTitle">API Key 设置</h3><button type="button" onclick="closeSettings()" aria-label="关闭设置">×</button></div>
+        <p class="settings-note">密钥保存在本地服务的 .env 文件中。留空保留原配置。两个 Groq Key 按切片交替转写；新配置用于后续转写任务。</p>
+        <label for="groqKey1">Groq API Key 1</label><input id="groqKey1" type="password" autocomplete="new-password" spellcheck="false">
+        <label for="groqKey2">Groq API Key 2</label><input id="groqKey2" type="password" autocomplete="new-password" spellcheck="false">
+        <label for="geminiKey">Gemini API Key（AI 聊天）</label><input id="geminiKey" type="password" autocomplete="new-password" spellcheck="false">
+        <p id="settingsStatus" role="status" aria-live="polite"></p>
+        <button id="saveSettingsBtn" type="submit">保存设置</button>
+    </form>
+</dialog>
 
 <!-- ═══════════════════════════════ COLUMN 2: MIDDLE (50vw) SUBTITLES ═══════════════════════════════ -->
 <main class="col-mid" id="colMid">
@@ -1014,7 +1148,7 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
                 <span class="font-disp" id="fontSizeDisplay">13.5px</span>
                 <button class="font-btn" onclick="adjustFontSize(1)">A+</button>
             </div>
-            <button class="refresh-btn" id="refreshBtn" onclick="triggerAiTranscribe()">
+            <button class="refresh-btn" id="refreshBtn" onclick="triggerAiTranscribe(false, !subtitlesComplete)">
                 <i class="fa-solid fa-rotate"></i> 刷新
             </button>
         </div>
@@ -1024,7 +1158,7 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
     <div class="welcome-screen" id="welcome">
         <i class="fa-solid fa-headphones-simple"></i>
         <h3>请在左侧选择一期播客</h3>
-        <p>点击节目单集即可开始自动加载音频与极速 AI 字幕。字幕占屏幕中间 50%，支持勾选即时向右侧 AI 助教提问！</p>
+        <p>在左侧选择一期节目，首段字幕就绪后自动播放。勾选中间的字幕，即可在右侧向 AI 助教提问。</p>
     </div>
 
     <!-- Subtitle Scroll Area -->
@@ -1107,6 +1241,7 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
         <!-- Chat messages area -->
         <div class="ai-messages" id="aiMessages">
             <div class="ai-welcome-card">
+                <button class="welcome-close" onclick="this.parentElement.remove()" aria-label="关闭提示" title="关闭提示">×</button>
                 <h4><i class="fa-solid fa-lightbulb" style="color:var(--amber)"></i> 智能字幕助学</h4>
                 在左侧字幕列表勾选任意句子，它们会自动被送入下方的提问框。<br>
                 你可以让大模型为你深度剖析<strong>长难句语法</strong>、<strong>地道习语</strong>或<strong>结合全集背景回答问题</strong>。
@@ -1120,14 +1255,14 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
                 <button class="clear-quotes-btn" onclick="clearSelectedCues()"><i class="fa-solid fa-xmark"></i> 取消勾选</button>
             </div>
             <div class="ai-quick-tags">
-                <button class="qtag" onclick="quickAsk('语法拆解')">📖 语法拆解</button>
-                <button class="qtag" onclick="quickAsk('地道用法')">🗣️ 地道用法</button>
-                <button class="qtag" onclick="quickAsk('逐词翻译')">🌐 逐词翻译</button>
-                <button class="qtag" onclick="quickAsk('全文要点')">📝 全文要点</button>
+                <button class="qtag" disabled onclick="quickAsk('语法拆解')">📖 语法拆解</button>
+                <button class="qtag" disabled onclick="quickAsk('地道用法')">🗣️ 地道用法</button>
+                <button class="qtag" disabled onclick="quickAsk('逐词翻译')">🌐 逐词翻译</button>
+                <button class="qtag" disabled onclick="quickAsk('全文要点')">📝 全文要点</button>
             </div>
             <div class="ai-input-row">
-                <textarea id="aiInput" placeholder="输入问题或勾选字幕提问... (Enter发送, Shift+Enter换行)" onkeydown="handleAiKey(event)"></textarea>
-                <button class="ai-send-btn" id="aiSendBtn" onclick="sendAiQuestion()" title="提问">
+                <textarea id="aiInput" aria-label="向 AI 助教提问" onkeydown="handleAiKey(event)"></textarea>
+                <button class="ai-send-btn" id="aiSendBtn" disabled onclick="sendAiQuestion()" title="提问">
                     <i class="fa-solid fa-paper-plane"></i>
                 </button>
             </div>
@@ -1166,6 +1301,10 @@ let coveredUntil = 0;
 let subtitlesComplete = false;
 let wantsPlayback = false;
 let waitingForSubtitles = false;
+let subtitleRetryTimer = null;
+let subtitleWatchdog = null;
+let reconnectAttempts = 0;
+let aiSending = false;
 let savedCues = new Set();
 let notebook = [];
 let selectedCues = new Set(); // Indices of checked cues
@@ -1264,7 +1403,7 @@ function renderTopCharts(results) {
     results.forEach((r, i) => {
         const img = hd(r.artworkUrl600);
         h += `<div class="pod-card" onclick="loadPodcast('${r.collectionId}')">
-            <img src="${img}" alt="" loading="lazy">
+            <img src="${escHtml(img)}" data-fallback="${escHtml(r.artworkUrl600 || '')}" onerror="recoverCover(this)" alt="" loading="lazy">
             <div class="pod-card-info">
                 <div class="pod-card-title">${esc(r.collectionName)}</div>
                 <div class="pod-card-artist">${esc(r.artistName)}</div>
@@ -1308,7 +1447,7 @@ function renderSearchResults(results) {
     let h = `<div class="sec-label">搜索结果 (${results.length})</div><div class="pod-grid">`;
     results.forEach(r => {
         h += `<div class="pod-card" onclick="loadPodcast('${r.collectionId}')">
-            <img src="${hd(r.artworkUrl600)}" alt="" loading="lazy">
+            <img src="${escHtml(hd(r.artworkUrl600))}" data-fallback="${escHtml(r.artworkUrl600 || '')}" onerror="recoverCover(this)" alt="" loading="lazy">
             <div class="pod-card-info">
                 <div class="pod-card-title">${esc(r.collectionName)}</div>
                 <div class="pod-card-artist">${esc(r.artistName)}</div>
@@ -1340,7 +1479,8 @@ async function loadPodcast(id) {
 async function loadRssUrl(url) {
     setPlaza('<div class="spinner"></div>');
     try {
-        const res = await fetch(`/api/feed?url=${enc(url)}`);
+        const res = await fetch(`/api/parse-feed?url=${enc(url)}`);
+        if (!res.ok) throw new Error('无法读取 RSS，请检查链接');
         const feed = await res.json();
         currentMeta = { title: feed.title, collectionName: feed.title, artist: feed.author, artistName: feed.author, artworkUrl600: feed.image };
         renderChannel(feed, currentMeta);
@@ -1378,7 +1518,7 @@ function renderChannel(feed, meta = {}, page = 1) {
             <i class="fa-solid fa-chevron-left"></i> 返回广场
         </button>
         <div class="chan-mini">
-            <img src="${cover}" alt="">
+            <img src="${escHtml(cover)}" data-fallback="${escHtml(meta.artworkUrl600 || '')}" onerror="recoverCover(this)" alt="">
             <div>
                 <div class="chan-mini-title">${esc(title)}</div>
                 <div class="chan-mini-author">${esc(author)} · 共 ${totalEps} 集</div>
@@ -1423,6 +1563,9 @@ function playByIdx(idx, cover, author) {
 }
 
 function startPlay(url, title, author, cover, transcriptUrl, description) {
+    if (window.matchMedia && window.matchMedia('(max-width:600px)').matches) collapseSidebar();
+    clearSubtitleRecovery();
+    reconnectAttempts = 0;
     collapseSidebar();
     if (subtitleStream) subtitleStream.close();
     subtitleStream = null;
@@ -1430,6 +1573,7 @@ function startPlay(url, title, author, cover, transcriptUrl, description) {
     isTranscribing = false;
     coveredUntil = 0;
     subtitlesComplete = false;
+    updateAiAvailability();
     wantsPlayback = true;
     waitingForSubtitles = true;
     nowPlaying = { url, title, author, cover, transcriptUrl, description };
@@ -1655,32 +1799,46 @@ function loadSubtitles() {
     triggerAiTranscribe(true);
 }
 
-function triggerAiTranscribe(auto = false) {
+function clearSubtitleRecovery() {
+    clearTimeout(subtitleRetryTimer);
+    clearInterval(subtitleWatchdog);
+    subtitleRetryTimer = null;
+    subtitleWatchdog = null;
+}
+
+function triggerAiTranscribe(auto = false, resume = false) {
     if (!nowPlaying) return;
+    clearSubtitleRecovery();
+    if (!resume || !auto) reconnectAttempts = 0;
     if (subtitleStream) subtitleStream.close();
     const request = ++subtitleRequest;
     const episode = nowPlaying;
     isTranscribing = true;
-    coveredUntil = 0;
     subtitlesComplete = false;
-    cues = [];
-    activeCue = -1;
-    waitingForSubtitles = wantsPlayback;
-    audio.pause();
+    updateAiAvailability();
+    if (!resume) {
+        coveredUntil = 0;
+        cues = [];
+        activeCue = -1;
+        waitingForSubtitles = wantsPlayback;
+        audio.pause();
+    }
     const btn = document.getElementById('refreshBtn');
     if (btn) btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 转写中...';
     const subScr = document.getElementById('subScroll');
-    if (subScr) subScr.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3)">正在加载首段字幕，就绪后开始播放。</div>';
+    if (subScr && !cues.length) subScr.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3)">正在加载字幕，就绪后开始播放。</div>';
     setBadge('等待首段字幕…', 'rgba(59,130,246,.15)', '#93c5fd', 'rgba(59,130,246,.3)');
 
     const finish = () => {
         if (request !== subtitleRequest) return;
+        clearSubtitleRecovery();
         if (subtitleStream) subtitleStream.close();
         subtitleStream = null;
         isTranscribing = false;
-        if (btn) btn.innerHTML = '<i class="fa-solid fa-rotate"></i> 刷新';
+        if (btn) btn.innerHTML = '<i class="fa-solid fa-rotate"></i> ' + (subtitlesComplete ? '刷新' : '重连 / 继续');
+        updateAiAvailability();
     };
-    const fail = (detail) => {
+    const fail = (detail, retryable = true) => {
         if (request !== subtitleRequest) return;
         finish();
         setBadge('转写失败', 'rgba(245,158,11,.15)', '#fbbf24', 'rgba(245,158,11,.3)');
@@ -1689,17 +1847,42 @@ function triggerAiTranscribe(auto = false) {
             subScr.textContent = detail;
             audio.pause();
         }
+        if (retryable && reconnectAttempts < 5) {
+            const attempt = ++reconnectAttempts;
+            const delay = Math.min(15000, 1000 * 2 ** (attempt - 1));
+            setBadge(`连接中断，${delay / 1000} 秒后从断点重连 (${attempt}/5)`, 'rgba(245,158,11,.15)', '#fbbf24', 'rgba(245,158,11,.3)');
+            subtitleRetryTimer = setTimeout(() => {
+                if (request === subtitleRequest && nowPlaying === episode) triggerAiTranscribe(true, true);
+            }, delay);
+        }
     };
     try {
-        const url = `/api/transcribe_stream?audio_url=${enc(episode.url)}&title=${enc(episode.title)}&transcript_url=${enc(episode.transcriptUrl)}&force_refresh=${!auto}`;
+        const url = `/api/transcribe_stream?audio_url=${enc(episode.url)}&title=${enc(episode.title)}&transcript_url=${enc(episode.transcriptUrl)}&force_refresh=${!auto && !resume}`;
         const stream = new EventSource(url);
         subtitleStream = stream;
+        let lastActivity = Date.now();
+        let lastAdvance = Date.now();
+        subtitleWatchdog = setInterval(() => {
+            if (request !== subtitleRequest || stream !== subtitleStream) return;
+            if (Date.now() - lastActivity > 45000 || Date.now() - lastAdvance > 180000) fail('字幕连接或转写进度停滞，正在从断点恢复。');
+        }, 5000);
         stream.onmessage = (e) => {
             if (request !== subtitleRequest || stream !== subtitleStream) return;
+            lastActivity = Date.now();
             let data;
             try { data = JSON.parse(e.data); }
             catch { fail('响应格式异常，请重试。'); return; }
-            if (data.status === 'official' || data.status === 'cached') {
+            if (data.status === 'heartbeat') return;
+            if (data.status === 'resumed') {
+                if (!Number.isFinite(data.until) || !Array.isArray(data.cues)) { fail('断点数据无效'); return; }
+                cues = data.cues.filter(c => c && Number.isFinite(c.start) && Number.isFinite(c.end) && c.end > c.start && typeof c.text === 'string');
+                coveredUntil = data.until;
+                selectedCues = new Set([...selectedCues].filter(i => i < cues.length));
+                activeCue = -1;
+                renderSubs();
+                syncSubs(audio.currentTime);
+                playWhenReady();
+            } else if (data.status === 'official' || data.status === 'cached') {
                 cues = parseVtt(data.vtt);
                 if (!cues.length) { fail('字幕缓存为空，请点击刷新。'); return; }
                 subtitlesComplete = true;
@@ -1718,9 +1901,11 @@ function triggerAiTranscribe(auto = false) {
                 setBadge(data.detail, 'rgba(168,85,247,.15)', '#c084fc', 'rgba(168,85,247,.3)');
             } else if (data.status === 'cue') {
                 const cue = data.cue;
-                if (cue && Number.isFinite(cue.start) && Number.isFinite(cue.end) && cue.end > cue.start && typeof cue.text === 'string') cues.push(cue);
+                if (cue && Number.isFinite(cue.start) && Number.isFinite(cue.end) && cue.end > cue.start && typeof cue.text === 'string' && !cues.some(c => c.start === cue.start && c.end === cue.end && c.text === cue.text)) cues.push(cue);
             } else if (data.status === 'chunk_ready') {
                 if (!Number.isFinite(data.until)) { fail('字幕进度无效'); return; }
+                if (data.until > coveredUntil) reconnectAttempts = 0;
+                lastAdvance = Date.now();
                 coveredUntil = Math.max(coveredUntil, data.until);
                 if (cues.length) {
                     renderSubs();
@@ -1736,7 +1921,7 @@ function triggerAiTranscribe(auto = false) {
                 setBadge('✅ 全篇转写完成', 'rgba(168,85,247,.15)', '#c084fc', 'rgba(168,85,247,.3)');
                 playWhenReady();
             } else if (data.status === 'error') {
-                fail(data.detail || '字幕转写失败');
+                fail(data.detail || '字幕转写失败', data.retryable !== false);
             }
         };
         stream.onerror = () => {
@@ -1847,22 +2032,18 @@ function getSelectedQuotesText() {
 function updateCueSelectionUI() {
     const bar = document.getElementById('selectedQuotesBar');
     const cnt = document.getElementById('selQuotesCount');
-    const aiInput = document.getElementById('aiInput');
     const count = selectedCues.size;
 
     if (count > 0) {
         if (bar) bar.style.display = 'flex';
         if (cnt) cnt.textContent = count;
-        if (aiInput && !aiInput.value.trim()) {
-            aiInput.placeholder = `已选 ${count} 句字幕，可直接点击快捷标签或输入问题提问...`;
-        }
     } else {
         if (bar) bar.style.display = 'none';
-        if (aiInput) aiInput.placeholder = '输入问题或勾选字幕提问... (Enter发送, Shift+Enter换行)';
     }
 }
 
 function quickAsk(type) {
+    if (!subtitlesComplete || aiSending) { toast('请等待全篇字幕完成后提问', 'info'); return; }
     const aiInput = document.getElementById('aiInput');
     if (!aiInput) return;
     const quotes = getSelectedQuotesText();
@@ -1887,7 +2068,21 @@ function handleAiKey(e) {
     }
 }
 
+function updateAiAvailability() {
+    const ready = !!nowPlaying && subtitlesComplete && cues.length > 0;
+    const btn = document.getElementById('aiSendBtn');
+    if (btn) {
+        btn.disabled = !ready || aiSending;
+        btn.title = ready ? '结合全篇字幕提问' : '请等待全篇字幕加载完成';
+    }
+    document.querySelectorAll('.qtag').forEach(button => { button.disabled = !ready || aiSending; });
+}
+
 async function sendAiQuestion() {
+    if (!subtitlesComplete || !cues.length || aiSending) {
+        toast('请等待全篇字幕加载完成后再发送', 'info');
+        return;
+    }
     const input = document.getElementById('aiInput');
     const question = input.value.trim();
     const selectedText = getSelectedQuotesText();
@@ -1909,7 +2104,8 @@ async function sendAiQuestion() {
 
     // Disable button
     const btn = document.getElementById('aiSendBtn');
-    if (btn) btn.disabled = true;
+    aiSending = true;
+    updateAiAvailability();
 
     try {
         const res = await fetch('/api/ask', {
@@ -1919,7 +2115,8 @@ async function sendAiQuestion() {
                 question: question,
                 selected_text: selectedText,
                 audio_url: nowPlaying ? nowPlaying.url : '',
-                full_transcript: fullTranscript
+                full_transcript: fullTranscript,
+                transcript_complete: subtitlesComplete
             })
         });
         const data = await res.json();
@@ -1927,13 +2124,14 @@ async function sendAiQuestion() {
         if (data.status === 'success') {
             appendChatMessage('ai', data.answer);
         } else {
-            appendChatMessage('ai', '⚠️ ' + (data.message || '提问失败，请稍后重试。'));
+            appendChatMessage('ai', '⚠️ ' + (data.message || data.detail || '提问失败，请稍后重试。'));
         }
     } catch (e) {
         removeChatLoading(loadingId);
         appendChatMessage('ai', '⚠️ 网络连接异常: ' + e.message);
     } finally {
-        if (btn) btn.disabled = false;
+        aiSending = false;
+        updateAiAvailability();
         clearSelectedCues();
     }
 }
@@ -1978,6 +2176,7 @@ function clearAiChat() {
     const list = document.getElementById('aiMessages');
     if (list) {
         list.innerHTML = `<div class="ai-welcome-card">
+                <button class="welcome-close" onclick="this.parentElement.remove()" aria-label="关闭提示" title="关闭提示">×</button>
             <h4><i class="fa-solid fa-lightbulb" style="color:var(--amber)"></i> 对话已清空</h4>
             在中间勾选字幕即可将句子送入提问框，随时向 AI 学习提问。
         </div>`;
@@ -2186,7 +2385,7 @@ function ft(sec) {
 }
 
 function hd(url) {
-    if (!url) return 'https://via.placeholder.com/300';
+    if (!url) return coverPlaceholder;
     if (url.includes('mzstatic.com'))
         return url.replace(/\d+x\d+bb\.(png|jpg|jpeg)/,'1200x1200bb.jpg').replace(/\d+x\d+bb/,'1200x1200bb');
     return url;
@@ -2214,8 +2413,95 @@ function toast(msg, type = 'info') {
 // ══════════════════════════════════════════════
 //  INIT
 // ══════════════════════════════════════════════
+const apiKeyInputs = {groq_key_1:'groqKey1',groq_key_2:'groqKey2',gemini_key:'geminiKey'};
+function alignBottomPanels() {
+    const panels = [document.querySelector('.mid-player-console'),document.querySelector('.ai-input-panel')];
+    const naturalHeight = panel => {
+        const style = getComputedStyle(panel);
+        const children = Array.from(panel.children).filter(child => getComputedStyle(child).display !== 'none');
+        return children.reduce((sum,child) => sum + child.getBoundingClientRect().height,0)
+            + Math.max(0,children.length - 1) * (parseFloat(style.rowGap) || 0)
+            + parseFloat(style.paddingTop) + parseFloat(style.paddingBottom)
+            + parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
+    };
+    const update = () => {
+        if (window.matchMedia('(max-width:600px)').matches) {
+            document.documentElement.style.removeProperty('--footer-height');
+            return;
+        }
+        document.documentElement.style.setProperty('--footer-height',Math.ceil(Math.max(...panels.map(naturalHeight))) + 'px');
+    };
+    update();
+    if (window.ResizeObserver) {
+        const observer = new ResizeObserver(update);
+        for (const panel of panels) {
+            observer.observe(panel);
+            for (const child of panel.children) observer.observe(child);
+        }
+    }
+    window.addEventListener('resize',update);
+}
+
+const coverPlaceholder = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80"><rect width="80" height="80" rx="12" fill="#a855f7"/><circle cx="40" cy="32" r="8" fill="white"/><path d="M30 48Q40 38 50 48L46 66H34Z" fill="white"/><path d="M22 46A25 25 0 1 1 58 46" fill="none" stroke="white" stroke-width="4"/></svg>');
+function recoverCover(image) {
+    const fallback = image.dataset.fallback;
+    if (!image.dataset.retried && fallback && fallback !== image.getAttribute('src')) {
+        image.dataset.retried = 'true';
+        image.src = fallback;
+        return;
+    }
+    image.onerror = null;
+    image.src = coverPlaceholder;
+}
+function applyKeyStatus(configured) {
+    for (const [field,id] of Object.entries(apiKeyInputs)) {
+        const input = document.getElementById(id);
+        input.value = '';
+        input.placeholder = configured[field] ? '已配置，输入新 Key 可替换' : '未配置，请输入 API Key';
+    }
+}
+async function openSettings() {
+    const dialog = document.getElementById('settingsDialog');
+    document.getElementById('settingsStatus').textContent = '正在读取配置…';
+    applyKeyStatus({});
+    dialog.showModal();
+    document.getElementById('saveSettingsBtn').disabled = true;
+    try {
+        const response = await fetch('/api/settings');
+        if (!response.ok) throw new Error();
+        const data = await response.json();
+        if (!dialog.open) return;
+        applyKeyStatus(data.configured);
+        document.getElementById('settingsStatus').textContent = '';
+    } catch {
+        document.getElementById('settingsStatus').textContent = '读取失败，请关闭后重试。';
+        return;
+    }
+    document.getElementById('saveSettingsBtn').disabled = false;
+}
+function closeSettings() {
+    document.getElementById('settingsDialog').close();
+    for (const id of Object.values(apiKeyInputs)) document.getElementById(id).value = '';
+}
+async function saveApiSettings(event) {
+    event.preventDefault();
+    const button = document.getElementById('saveSettingsBtn');
+    if (button.disabled) return;
+    button.disabled = true;
+    const body = Object.fromEntries(Object.entries(apiKeyInputs).map(([field,id]) => [field,document.getElementById(id).value.trim()]));
+    try {
+        const response = await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+        if (!response.ok) throw new Error();
+        applyKeyStatus((await response.json()).configured);
+        document.getElementById('settingsStatus').textContent = '已保存，后续转写和聊天将使用新配置。';
+    } catch {
+        document.getElementById('settingsStatus').textContent = '保存失败，请重试。';
+    } finally { button.disabled = false; }
+}
 window.onload = () => {
+    alignBottomPanels();
     loadNotebook();
+    updateAiAvailability();
     applyFontSize();
     loadTopCharts('us');
 };

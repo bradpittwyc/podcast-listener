@@ -42,6 +42,8 @@ def main():
                         self.wfile.flush()
                         while True:
                             item = messages.get(timeout=20)
+                            if item is None:
+                                return
                             self.wfile.write(("data: " + json.dumps(item) + "\n\n").encode())
                             self.wfile.flush()
                     except (BrokenPipeError, ConnectionResetError, queue.Empty):
@@ -96,14 +98,24 @@ def main():
                 page.wait_for_function("!audio.paused && audio.currentTime > 0")
                 page.evaluate("audio.currentTime = 30.1")
                 page.wait_for_function("audio.paused && waitingForSubtitles")
-                streams[0].put({"status": "cue", "cue": {"start": 30, "end": 59, "text": "Second chunk."}})
-                streams[0].put({"status": "chunk_ready", "until": 60})
+                # End the real SSE connection and wait for the client's automatic retry.
+                streams[0].put(None)
+                page.wait_for_function("subtitleRequest >= 3 && subtitleStream !== null")
+                for _ in range(100):
+                    if len(streams) >= 2:
+                        break
+                    page.wait_for_timeout(20)
+                assert len(streams) >= 2
+                active_stream = streams[1]
+                active_stream.put({"status":"resumed", "until":30, "cues":[{"start":0,"end":29,"text":"Don't start before subtitles."}]})
+                active_stream.put({"status": "cue", "cue": {"start": 30, "end": 59, "text": "Second chunk."}})
+                active_stream.put({"status": "chunk_ready", "until": 60})
                 page.wait_for_function("!audio.paused && coveredUntil === 60")
                 assert page.evaluate("audio.currentTime >= 30")
                 page.click("#playBtn")
                 assert page.evaluate("audio.paused && !wantsPlayback")
-                streams[0].put({"status": "cue", "cue": {"start": 60, "end": 89, "text": "Third chunk."}})
-                streams[0].put({"status": "chunk_ready", "until": 90})
+                active_stream.put({"status": "cue", "cue": {"start": 60, "end": 89, "text": "Third chunk."}})
+                active_stream.put({"status": "chunk_ready", "until": 90})
                 page.wait_for_function("coveredUntil === 90")
                 assert page.evaluate("audio.paused")
                 # An apostrophe word has a valid native inline handler.
@@ -112,7 +124,7 @@ def main():
                 page.wait_for_function("nowPlaying.url === '/cache/two.mp3' && cues.length === 0")
                 assert page.evaluate("audio.paused")
                 assert not errors, errors
-                print("Browser passed: waits for subtitles, frontier pause/resume, manual pause, episode switch, native audio and word handlers.")
+                print("Browser passed: first-chunk wait, real SSE disconnect/reconnect, preserved timestamp, frontier pause/resume, manual pause, episode switch.")
                 browser.close()
         finally:
             server.shutdown()

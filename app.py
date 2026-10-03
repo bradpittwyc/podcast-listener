@@ -1,6 +1,8 @@
 import os
 import re
 import json
+import tempfile
+import threading
 import urllib.parse
 import xml.etree.ElementTree as ET
 import requests
@@ -11,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from google import genai as genai_sdk
-from dotenv import load_dotenv
+from dotenv import load_dotenv, set_key
 from transcription import transcript_events, stream_with_heartbeat, to_vtt, cache_paths
 
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
@@ -36,6 +38,58 @@ STATIC_DIR = os.path.join(BASE_DIR, "static")
 os.makedirs(STATIC_DIR, exist_ok=True)
 
 app.mount("/cache", StaticFiles(directory=CACHE_DIR), name="cache")
+
+SETTINGS_PATH = os.path.join(BASE_DIR, ".env")
+settings_lock = threading.Lock()
+KEY_FIELDS = {"groq_key_1": "GROQ_API_KEY_1", "groq_key_2": "GROQ_API_KEY_2", "gemini_key": "GEMINI_API_KEY"}
+
+def key_settings():
+    return {field: bool(os.environ.get(name, "") or (os.environ.get("GROQ_API_KEY", "") if field == "groq_key_1" else ""))
+            for field, name in KEY_FIELDS.items()}
+
+@app.get("/api/settings")
+def get_settings():
+    return {"configured": key_settings()}
+
+@app.post("/api/settings")
+async def save_settings(request: Request):
+    global GEMINI_API_KEY, gemini_client
+    origin = request.headers.get("origin")
+    if origin and origin != str(request.base_url).rstrip("/"):
+        raise HTTPException(403, "请从本地页面保存设置")
+    if "application/json" not in request.headers.get("content-type", ""):
+        raise HTTPException(415, "需要 JSON 请求")
+    try:
+        body = await request.json()
+    except ValueError:
+        raise HTTPException(400, "设置格式错误")
+    if not isinstance(body, dict) or set(body) - set(KEY_FIELDS):
+        raise HTTPException(400, "设置格式错误")
+    updates = {}
+    for field, value in body.items():
+        if not isinstance(value, str) or len(value) > 512 or any(c in value for c in "\r\n\x00"):
+            raise HTTPException(400, "API Key 格式错误")
+        if value.strip():
+            updates[KEY_FIELDS[field]] = value.strip()
+    new_client = genai_sdk.Client(api_key=updates["GEMINI_API_KEY"]) if "GEMINI_API_KEY" in updates else None
+    with settings_lock:
+        fd, temporary = tempfile.mkstemp(prefix=".env-", dir=BASE_DIR)
+        os.close(fd)
+        try:
+            if os.path.exists(SETTINGS_PATH):
+                with open(SETTINGS_PATH, encoding="utf-8") as source, open(temporary, "w", encoding="utf-8") as target:
+                    target.write(source.read())
+            for name, value in updates.items():
+                set_key(temporary, name, value)
+            os.replace(temporary, SETTINGS_PATH)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+        os.environ.update(updates)
+        if new_client is not None:
+            GEMINI_API_KEY = updates["GEMINI_API_KEY"]
+            gemini_client = new_client
+    return {"configured": key_settings()}
 
 def upgrade_to_hd_image(img_url: str) -> str:
     if not img_url:
@@ -188,6 +242,8 @@ def get_or_generate_transcript(audio_url: str, title: str = "", transcript_url: 
             return {"source": status, "vtt": event["vtt"], **({"local_audio": event["local_audio"]} if "local_audio" in event else {})}
         if status == "audio_ready":
             local_audio = event["local_audio"]
+        elif status == "resumed":
+            cues = event["cues"]
         elif status == "cue":
             cues.append(event["cue"])
         elif status == "error":
@@ -259,6 +315,11 @@ async def ask_podcast_ai(request: Request):
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON body")
 
+    if not isinstance(body, dict) or any(not isinstance(body.get(name, ""), str) for name in ("question", "selected_text", "audio_url", "full_transcript")):
+        raise HTTPException(status_code=400, detail="Invalid question fields")
+    if body.get("transcript_complete") is not True:
+        raise HTTPException(status_code=409, detail="请等待全篇字幕加载完成后再提问。")
+
     question = (body.get("question") or "").strip()
     selected_text = (body.get("selected_text") or "").strip()
     audio_url = (body.get("audio_url") or "").strip()
@@ -288,8 +349,10 @@ async def ask_podcast_ai(request: Request):
     if not transcript_text and client_transcript:
         transcript_text = client_transcript
 
-    # 适当截断背景，确保在合理 token 范围内
-    bg_context = transcript_text[:25000] if transcript_text else "（当前无可用全篇字幕背景）"
+    if not transcript_text:
+        raise HTTPException(status_code=409, detail="缺少完整字幕，请加载字幕后重试。")
+    # Include the whole completed transcript; never silently cut off its ending.
+    bg_context = transcript_text
     quote_section = f"【用户勾选引用的字幕语句】:\n{selected_text}\n" if selected_text else ""
     user_query = question if question else "请详细解析上述勾选字幕句子的语法结构、生词习语和地道用法。"
 
@@ -311,7 +374,7 @@ async def ask_podcast_ai(request: Request):
 
     try:
         model_name = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
-        response = gemini_client.models.generate_content(
+        response = await gemini_client.aio.models.generate_content(
             model=model_name,
             contents=prompt,
         )
