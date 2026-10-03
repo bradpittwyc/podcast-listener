@@ -5,6 +5,7 @@ import hashlib
 import urllib.parse
 import xml.etree.ElementTree as ET
 import requests
+import socket
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -154,6 +155,15 @@ def format_timestamp_vtt(seconds: float) -> str:
     secs = seconds % 60
     return f"{hrs:02d}:{mins:02d}:{secs:06.3f}"
 
+def get_local_proxy():
+    common_ports = [7890, 10809, 1080, 7891, 10808]
+    for port in common_ports:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.1)
+            if s.connect_ex(('127.0.0.1', port)) == 0:
+                return {"http": f"http://127.0.0.1:{port}", "https": f"http://127.0.0.1:{port}"}
+    return None
+
 @app.get("/api/transcribe")
 def get_or_generate_transcript(audio_url: str, title: str = "", transcript_url: str = "", force_refresh: bool = False):
     """
@@ -163,11 +173,12 @@ def get_or_generate_transcript(audio_url: str, title: str = "", transcript_url: 
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
+    proxies = get_local_proxy()
 
     # 1. Check official VTT transcript link first
     if transcript_url and not force_refresh:
         try:
-            r = requests.get(transcript_url, headers=headers, timeout=10)
+            r = requests.get(transcript_url, headers=headers, timeout=10, proxies=proxies)
             if r.status_code == 200 and "WEBVTT" in r.text.upper():
                 return {"source": "official", "vtt": r.text}
         except Exception:
@@ -186,45 +197,63 @@ def get_or_generate_transcript(audio_url: str, title: str = "", transcript_url: 
                 return {"source": "local_cache", "vtt": content, "local_audio": local_audio}
 
     try:
-        # 3. Download the FULL audio file to ensure 100% sync with frontend (Bypass Dynamic Ad Insertion mismatch)
+        # 3. 极速测试缓冲：只下载前 3MB 音频（约 3 分钟），保证 1 秒内能下完并上传给 Groq
         if not os.path.exists(mp3_path) or force_refresh:
-            with requests.get(audio_url, headers=headers, stream=True, allow_redirects=True, timeout=30) as r:
+            with requests.get(audio_url, headers=headers, stream=True, allow_redirects=True, timeout=30, proxies=proxies) as r:
                 r.raise_for_status()
+                downloaded = 0
                 with open(mp3_path, "wb") as f:
                     for chunk in r.iter_content(chunk_size=512 * 1024):
                         f.write(chunk)
+                        downloaded += len(chunk)
+                        if downloaded > 3 * 1024 * 1024:
+                            break
 
-            # Validate downloaded audio file size
-            if not os.path.exists(mp3_path) or os.path.getsize(mp3_path) < 100 * 1024:
+            if not os.path.exists(mp3_path) or os.path.getsize(mp3_path) < 50 * 1024:
                 raise HTTPException(status_code=400, detail="Downloaded audio file is invalid or too small.")
 
-        # 4. Transcribe using faster-whisper (base.en model)
-        model = get_whisper_model()
-        segments, _ = model.transcribe(
-            mp3_path,
-            language="en",
-            beam_size=1,
-            best_of=1,
-            vad_filter=True,
-            vad_parameters=dict(min_silence_duration_ms=500),
-            initial_prompt="This is an English podcast episode transcript."
-        )
+        # 4. 调用 Groq API 极速生成字幕 (代替本地老牛拉破车的 CPU)
+        groq_api_key = os.environ.get("GROQ_API_KEY", "")
+        groq_url = "https://api.groq.com/openai/v1/audio/transcriptions"
+        
+        with open(mp3_path, "rb") as f:
+            files = {
+                "file": ("audio.mp3", f, "audio/mpeg")
+            }
+            data = {
+                "model": "whisper-large-v3-turbo",
+                "response_format": "verbose_json",
+                "language": "en"
+            }
+            req = requests.post(
+                groq_url,
+                headers={"Authorization": f"Bearer {groq_api_key}"},
+                files=files,
+                data=data,
+                timeout=60,
+                proxies=proxies
+            )
+            req.raise_for_status()
+            
+            resp_json = req.json()
+            
+            # Convert verbose_json to VTT
+            vtt_lines = ["WEBVTT", ""]
+            prev_text = ""
+            for seg in resp_json.get("segments", []):
+                s = format_timestamp_vtt(seg.get("start", 0))
+                e = format_timestamp_vtt(seg.get("end", 0))
+                text = seg.get("text", "").strip()
+                if text and text != prev_text:
+                    vtt_lines.append(f"{s} --> {e}\n{text}\n")
+                    prev_text = text
 
-        vtt_lines = ["WEBVTT", ""]
-        prev_text = ""
-        for seg in segments:
-            s = format_timestamp_vtt(seg.start)
-            e = format_timestamp_vtt(seg.end)
-            text = seg.text.strip()
-            if text and text != prev_text:
-                vtt_lines.append(f"{s} --> {e}\n{text}\n")
-                prev_text = text
+            vtt_content = "\n".join(vtt_lines)
 
-        vtt_content = "\n".join(vtt_lines)
         with open(vtt_path, "w", encoding="utf-8") as f:
             f.write(vtt_content)
 
-        return {"source": "whisper_ai", "vtt": vtt_content, "local_audio": local_audio}
+        return {"source": "groq_api", "vtt": vtt_content, "local_audio": local_audio}
     except Exception as e:
         return {"source": "error", "detail": str(e), "vtt": ""}
 

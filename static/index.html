@@ -911,12 +911,26 @@ async function triggerAiTranscribe(auto = false) {
                 return;
             }
         }
-        document.getElementById('subScroll').innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3);font-size:13px">暂未生成字幕</div>';
+        
+        // 如果虽然没查到字幕，但是有本地音频缓存（说明后端截取成功），也直接播放，不要卡死
+        if (data.local_audio) {
+            audio.src = data.local_audio;
+        }
+        audio.play();
+        setPlayIcon(true);
+        
+        document.getElementById('subScroll').innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3);font-size:13px">暂未生成字幕，但已为您播放声音</div>';
         toast('AI transcription returned no results.', 'info');
     } catch(e) {
         isTranscribing = false;
         btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Refresh';
-        document.getElementById('subScroll').innerHTML = `<div style="text-align:center;padding:40px;color:var(--text3);font-size:13px">转写失败: ${e.message}</div>`;
+        
+        // 发生致命错误时，退回使用原始链接直接播放
+        audio.src = nowPlaying.url;
+        audio.play();
+        setPlayIcon(true);
+        
+        document.getElementById('subScroll').innerHTML = `<div style="text-align:center;padding:40px;color:var(--text3);font-size:13px">转写失败: ${e.message}。已自动为您播放原声音频。</div>`;
         toast('Transcription error: ' + e.message, 'info');
     }
 }
