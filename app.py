@@ -208,54 +208,37 @@ def get_or_generate_transcript(audio_url: str, title: str = "", transcript_url: 
             if not os.path.exists(mp3_path) or os.path.getsize(mp3_path) < 50 * 1024:
                 raise HTTPException(status_code=400, detail="Downloaded audio file is invalid or too small.")
 
-        # 4. 调用 Groq API 极速生成字幕
-        # 由于 Groq 有 25MB 的文件体积限制，我们只读取前 24MB 发送给它（约产生前 30 分钟的高质量字幕）
-        groq_api_key = os.environ.get("GROQ_API_KEY", "")
-        groq_url = "https://api.groq.com/openai/v1/audio/transcriptions"
-        
-        MAX_GROQ_BYTES = 24 * 1024 * 1024
-        
-        with open(mp3_path, "rb") as f:
-            audio_bytes = f.read(MAX_GROQ_BYTES)
-            
-            files = {
-                "file": ("audio.mp3", audio_bytes, "audio/mpeg")
-            }
-            data = {
-                "model": "whisper-large-v3-turbo",
-                "response_format": "verbose_json",
-                "language": "en"
-            }
-            req = requests.post(
-                groq_url,
-                headers={"Authorization": f"Bearer {groq_api_key}"},
-                files=files,
-                data=data,
-                timeout=60,
-                proxies=proxies
-            )
-            req.raise_for_status()
-            
-            resp_json = req.json()
-            
-            # Convert verbose_json to VTT
-            vtt_lines = ["WEBVTT", ""]
-            prev_text = ""
-            for seg in resp_json.get("segments", []):
-                s = format_timestamp_vtt(seg.get("start", 0))
-                e = format_timestamp_vtt(seg.get("end", 0))
-                text = seg.get("text", "").strip()
-                if text and text != prev_text:
-                    vtt_lines.append(f"{s} --> {e}\n{text}\n")
-                    prev_text = text
+        # 4. 调用本地 Whisper AI 生成字幕 (由于没有系统级全局代理，Groq 会被 GFW 阻断导致 60 秒超时)
+        model = get_whisper_model()
+        segments, _ = model.transcribe(
+            mp3_path,
+            language="en",
+            beam_size=1,
+            best_of=1,
+            vad_filter=True,
+            vad_parameters=dict(min_silence_duration_ms=500),
+            initial_prompt="This is an English podcast episode transcript."
+        )
 
-            vtt_content = "\n".join(vtt_lines)
+        vtt_lines = ["WEBVTT", ""]
+        prev_text = ""
+        for seg in segments:
+            s = format_timestamp_vtt(seg.start)
+            e = format_timestamp_vtt(seg.end)
+            text = seg.text.strip()
+            if text and text != prev_text:
+                vtt_lines.append(f"{s} --> {e}\n{text}\n")
+                prev_text = text
+
+        vtt_content = "\n".join(vtt_lines)
 
         with open(vtt_path, "w", encoding="utf-8") as f:
             f.write(vtt_content)
 
         return {"source": "groq_api", "vtt": vtt_content, "local_audio": local_audio}
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return {"source": "error", "detail": str(e), "vtt": ""}
 
 @app.api_route("/api/define", methods=["GET", "POST", "HEAD"])
