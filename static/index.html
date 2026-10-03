@@ -1,0 +1,1324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Podcast Learner</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<style>
+:root {
+    --bg: #09090f;
+    --sidebar-bg: #0d0d18;
+    --sidebar-w: 360px;
+    --card-bg: rgba(255,255,255,0.04);
+    --card-hover: rgba(255,255,255,0.07);
+    --purple: #a855f7;
+    --pink: #ec4899;
+    --grad: linear-gradient(135deg, #a855f7 0%, #ec4899 100%);
+    --green: #10b981;
+    --amber: #f59e0b;
+    --blue: #3b82f6;
+    --text: #f1f5f9;
+    --text2: #94a3b8;
+    --text3: #475569;
+    --border: rgba(255,255,255,0.07);
+    --player-h: 68px;
+    --console-h: 96px;
+}
+*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",Helvetica,Arial,sans-serif;}
+html,body{height:100%;overflow:hidden;}
+body{display:flex;background:var(--bg);color:var(--text);}
+
+/* ═══════════════════════════════ SCROLLBAR ═══════════════════════════════ */
+::-webkit-scrollbar{width:4px;height:4px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:2px;}
+
+/* ═══════════════════════════════ SIDEBAR ═══════════════════════════════ */
+.sidebar{
+    width:var(--sidebar-w);min-width:var(--sidebar-w);
+    background:var(--sidebar-bg);
+    border-right:1px solid var(--border);
+    display:flex;flex-direction:column;
+    height:100vh;overflow:hidden;
+    transition:width .28s cubic-bezier(.4,0,.2,1),min-width .28s cubic-bezier(.4,0,.2,1);
+    flex-shrink:0;position:relative;z-index:10;
+}
+.sidebar.collapsed{width:0;min-width:0;}
+.sidebar-inner{width:var(--sidebar-w);height:100%;display:flex;flex-direction:column;overflow:hidden;}
+
+/* sidebar header */
+.sidebar-hd{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:14px 12px 12px 16px;
+    border-bottom:1px solid var(--border);flex-shrink:0;
+}
+.logo-wrap{}
+.logo-name{
+    font-size:15px;font-weight:700;letter-spacing:-.3px;
+    background:var(--grad);-webkit-background-clip:text;-webkit-text-fill-color:transparent;
+}
+.logo-tag{font-size:10px;color:var(--text3);margin-top:1px;}
+.sidebar-close{
+    width:28px;height:28px;background:var(--card-bg);border:1px solid var(--border);
+    border-radius:8px;color:var(--text3);cursor:pointer;
+    display:flex;align-items:center;justify-content:center;font-size:11px;
+    transition:all .15s;
+}
+.sidebar-close:hover{background:var(--card-hover);color:var(--text2);}
+
+/* sidebar tabs */
+.sidebar-tabs{display:flex;padding:10px 10px 0;gap:4px;flex-shrink:0;}
+.stab{
+    flex:1;padding:6px 8px;background:transparent;
+    border:1px solid transparent;border-radius:8px;
+    color:var(--text3);font-size:12px;font-weight:600;cursor:pointer;
+    transition:all .15s;display:flex;align-items:center;justify-content:center;gap:5px;
+}
+.stab.active{background:var(--card-hover);border-color:var(--border);color:var(--text);}
+.stab:hover:not(.active){color:var(--text2);}
+
+/* scrollable content */
+.sidebar-body{flex:1;overflow-y:auto;overflow-x:hidden;}
+
+/* search */
+.search-row{display:flex;gap:6px;padding:10px 10px 6px;}
+.search-row input{
+    flex:1;background:var(--card-bg);border:1px solid var(--border);
+    border-radius:9px;padding:7px 11px;color:var(--text);font-size:13px;outline:none;
+}
+.search-row input::placeholder{color:var(--text3);}
+.search-row input:focus{border-color:rgba(168,85,247,.4);}
+.search-row button{
+    background:var(--grad);border:none;border-radius:9px;
+    padding:7px 12px;color:#fff;font-size:13px;cursor:pointer;
+}
+
+/* region tabs */
+.region-row{
+    display:flex;gap:5px;padding:0 10px 8px;
+    overflow-x:auto;flex-shrink:0;cursor:grab;
+}
+.region-row::-webkit-scrollbar{height:3px;}
+.region-row::-webkit-scrollbar-thumb{background:rgba(168,85,247,0.3);border-radius:2px;}
+.rbtn{
+    padding:4px 11px;background:var(--card-bg);border:1px solid var(--border);
+    border-radius:20px;color:var(--text3);font-size:11px;font-weight:600;
+    cursor:pointer;white-space:nowrap;transition:all .15s;
+}
+.rbtn.active{background:rgba(168,85,247,.15);border-color:rgba(168,85,247,.45);color:#c084fc;}
+.rbtn:hover:not(.active){color:var(--text2);}
+
+/* preset chips */
+.preset-row{
+    display:flex;gap:5px;padding:0 10px 10px;
+    overflow-x:auto;flex-shrink:0;cursor:grab;
+}
+.preset-row::-webkit-scrollbar{height:3px;}
+.preset-row::-webkit-scrollbar-thumb{background:rgba(236,72,153,0.3);border-radius:2px;}
+.chip{
+    padding:3px 10px;background:rgba(236,72,153,.08);
+    border:1px solid rgba(236,72,153,.2);border-radius:20px;
+    color:#f9a8d4;font-size:11px;cursor:pointer;white-space:nowrap;transition:all .15s;
+}
+.chip:hover{background:rgba(236,72,153,.15);}
+
+/* section label */
+.sec-label{
+    padding:8px 12px 4px;font-size:10px;font-weight:700;
+    color:var(--text3);text-transform:uppercase;letter-spacing:.6px;
+}
+
+/* podcast card grid */
+.pod-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:9px;padding:4px 10px 16px;}
+.pod-card{
+    background:var(--card-bg);border:1px solid var(--border);
+    border-radius:11px;overflow:hidden;cursor:pointer;
+    transition:all .2s;position:relative;
+}
+.pod-card:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,.4);border-color:rgba(168,85,247,.3);}
+.pod-card img{width:100%;aspect-ratio:1;object-fit:cover;display:block;}
+.pod-card-info{padding:7px 8px 9px;}
+.pod-card-title{font-size:11px;font-weight:600;line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
+.pod-card-artist{font-size:10px;color:var(--text3);margin-top:2px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}
+.rank-badge{position:absolute;top:5px;left:5px;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);border-radius:5px;padding:2px 6px;font-size:10px;font-weight:700;color:var(--text3);}
+.cc-dot{position:absolute;top:5px;right:5px;width:17px;height:17px;background:rgba(245,158,11,.85);border-radius:4px;display:flex;align-items:center;justify-content:center;}
+
+/* channel view */
+.channel-hd{padding:10px 12px;border-bottom:1px solid var(--border);flex-shrink:0;}
+.back-btn{background:none;border:none;color:var(--purple);font-size:12px;cursor:pointer;padding:0 0 8px;display:flex;align-items:center;gap:4px;}
+.chan-mini{display:flex;gap:10px;align-items:center;}
+.chan-mini img{width:48px;height:48px;border-radius:9px;object-fit:cover;flex-shrink:0;}
+.chan-mini-title{font-size:13px;font-weight:700;line-height:1.3;}
+.chan-mini-author{font-size:11px;color:var(--text3);margin-top:2px;}
+
+/* episode list */
+.ep-list{}
+.ep-item{
+    display:flex;align-items:flex-start;gap:9px;
+    padding:9px 12px;border-bottom:1px solid var(--border);
+    cursor:pointer;transition:background .15s;
+}
+.ep-item:hover{background:var(--card-hover);}
+.ep-item.playing{background:rgba(168,85,247,.08);border-left:2px solid var(--purple);padding-left:10px;}
+.ep-icon{
+    width:26px;height:26px;flex-shrink:0;background:var(--card-bg);
+    border-radius:50%;display:flex;align-items:center;justify-content:center;
+    font-size:9px;color:var(--purple);margin-top:1px;
+}
+.ep-item.playing .ep-icon{background:var(--grad);color:#fff;}
+.ep-info{flex:1;min-width:0;}
+.ep-title{font-size:12px;font-weight:600;line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
+.ep-meta-s{font-size:10px;color:var(--text3);margin-top:3px;}
+
+/* notebook */
+.nb-hd{padding:10px 12px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);}
+.nb-count{font-size:12px;color:var(--text3);}
+.export-btn{background:var(--card-bg);border:1px solid var(--border);border-radius:7px;padding:5px 9px;color:var(--text2);font-size:11px;cursor:pointer;transition:all .15s;}
+.export-btn:hover{border-color:var(--purple);color:var(--purple);}
+.nb-empty{text-align:center;padding:36px 20px;color:var(--text3);font-size:13px;line-height:1.8;}
+.nb-entry{padding:10px 12px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s;}
+.nb-entry:hover{background:var(--card-hover);}
+.nb-text{font-size:12px;line-height:1.55;color:var(--text);font-style:italic;}
+.nb-meta{font-size:10px;color:var(--text3);margin-top:5px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
+.nb-del{margin-left:auto;background:none;border:none;color:var(--text3);cursor:pointer;font-size:11px;padding:2px 4px;border-radius:4px;transition:all .15s;}
+.nb-del:hover{color:#f87171;background:rgba(248,113,113,.1);}
+
+/* floating open btn */
+#sidebarOpenBtn{
+    position:fixed;left:10px;top:14px;z-index:50;
+    width:34px;height:34px;background:var(--sidebar-bg);
+    border:1px solid var(--border);border-radius:9px;
+    display:none;align-items:center;justify-content:center;
+    color:var(--text2);cursor:pointer;font-size:14px;
+    box-shadow:0 4px 12px rgba(0,0,0,.4);transition:all .15s;
+}
+#sidebarOpenBtn:hover{border-color:var(--purple);color:var(--purple);}
+
+/* ═══════════════════════════════ MAIN AREA ═══════════════════════════════ */
+.main{flex:1;display:flex;flex-direction:column;height:100vh;overflow:hidden;min-width:0;}
+
+/* player bar */
+.player-bar{
+    height:var(--player-h);background:rgba(13,13,24,.96);
+    border-bottom:1px solid var(--border);backdrop-filter:blur(20px);
+    display:flex;align-items:center;padding:0 18px;gap:14px;flex-shrink:0;
+}
+.pb-cover{width:42px;height:42px;border-radius:7px;object-fit:cover;flex-shrink:0;box-shadow:0 3px 10px rgba(0,0,0,.4);}
+.pb-info{min-width:0;flex-shrink:0;max-width:190px;}
+.pb-title{font-size:13px;font-weight:600;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}
+.pb-author{font-size:11px;color:var(--text3);margin-top:1px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}
+.pb-progress{flex:1;display:flex;align-items:center;gap:9px;min-width:0;}
+.pb-time{font-size:11px;color:var(--text3);white-space:nowrap;font-variant-numeric:tabular-nums;}
+.prog-bar{flex:1;height:4px;background:rgba(255,255,255,.09);border-radius:2px;cursor:pointer;transition:height .15s;}
+.prog-bar:hover{height:6px;}
+.prog-fill{height:100%;background:var(--grad);border-radius:2px;transition:width .25s linear;pointer-events:none;}
+.pb-ctrl{display:flex;align-items:center;gap:3px;flex-shrink:0;}
+.cbtn{width:32px;height:32px;background:none;border:none;border-radius:8px;color:var(--text2);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:14px;transition:all .15s;}
+.cbtn:hover{background:var(--card-hover);color:var(--text);}
+.cbtn.play{width:38px;height:38px;background:var(--grad);color:#fff;border-radius:50%;font-size:14px;box-shadow:0 3px 10px rgba(168,85,247,.4);}
+.cbtn.play:hover{opacity:.9;transform:scale(1.05);}
+
+/* welcome */
+.welcome{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--text3);gap:14px;padding:40px;text-align:center;}
+.welcome i{font-size:72px;opacity:.1;}
+.welcome h2{font-size:20px;font-weight:600;color:var(--text2);}
+.welcome p{font-size:14px;color:var(--text3);line-height:1.7;max-width:320px;}
+
+/* subtitle panel */
+.sub-panel{flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0;}
+.sub-hd{
+    height:46px;display:flex;align-items:center;justify-content:space-between;
+    padding:0 22px;border-bottom:1px solid var(--border);
+    background:rgba(9,9,15,.6);flex-shrink:0;
+}
+.sub-hd-left{display:flex;align-items:center;gap:9px;font-size:13px;font-weight:600;color:var(--text2);}
+.sub-badge{font-size:11px;padding:2px 8px;border-radius:9px;font-weight:600;border:1px solid;transition:all .4s;}
+.sub-actions{display:flex;align-items:center;gap:8px;}
+.refresh-btn{
+    display:flex;align-items:center;gap:5px;
+    background:rgba(168,85,247,.12);border:1px solid rgba(168,85,247,.3);
+    border-radius:7px;padding:4px 11px;color:#c084fc;font-size:12px;font-weight:600;
+    cursor:pointer;transition:all .15s;
+}
+.refresh-btn:hover{background:rgba(168,85,247,.22);}
+
+.sub-scroll{flex:1;overflow-y:auto;padding:12px 22px 20px;}
+
+/* subtitle lines */
+.preview-alert{
+    background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.22);
+    border-radius:10px;padding:9px 14px;margin-bottom:12px;
+    font-size:12px;color:#fde68a;display:flex;align-items:center;gap:9px;
+}
+.preview-alert i{flex-shrink:0;color:var(--amber);}
+.sub-line{
+    display:flex;align-items:flex-start;gap:10px;
+    padding:7px 9px;border-radius:9px;margin-bottom:3px;
+    cursor:pointer;transition:background .15s;position:relative;
+}
+.sub-line:hover{background:var(--card-hover);}
+.sub-line.active{background:rgba(168,85,247,.11);}
+.sub-ts{
+    font-size:10px;color:var(--text3);white-space:nowrap;
+    font-variant-numeric:tabular-nums;padding-top:3px;min-width:36px;flex-shrink:0;
+}
+.sub-txt{
+    flex:1;font-size:15px;line-height:1.7;color:var(--text2);
+    transition:color .2s,font-size .2s;
+}
+.sub-line.active .sub-txt{color:var(--text);font-size:16px;font-weight:500;}
+.word{
+    cursor:pointer;border-radius:3px;padding:0 1px;
+    transition:all .1s;display:inline;
+}
+.word:hover{background:rgba(168,85,247,.22);color:var(--text);text-decoration:underline;text-underline-offset:2px;}
+.save-btn{
+    opacity:0;width:24px;height:24px;background:none;
+    border:1px solid var(--border);border-radius:6px;
+    color:var(--text3);cursor:pointer;
+    display:flex;align-items:center;justify-content:center;font-size:11px;
+    flex-shrink:0;transition:all .15s;margin-top:2px;
+}
+.sub-line:hover .save-btn{opacity:1;}
+.save-btn:hover{background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.35);color:var(--amber);}
+.save-btn.saved{opacity:1;color:var(--amber);border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.09);}
+
+/* ═══════════════════════════════ DICT POPUP ═══════════════════════════════ */
+#dictPopup{
+    position:fixed;z-index:200;
+    background:#141422;border:1px solid rgba(168,85,247,.3);
+    border-radius:14px;padding:15px 17px;
+    width:320px;max-width:calc(100vw - 24px);
+    max-height:calc(100vh - 40px);overflow-y:auto;
+    box-shadow:0 20px 60px rgba(0,0,0,.75);
+    animation:popIn .15s ease;
+}
+@keyframes popIn{from{opacity:0;transform:scale(.94) translateY(-5px);}to{opacity:1;transform:scale(1) translateY(0);}}
+.dict-close{position:absolute;top:8px;right:8px;background:none;border:none;color:var(--text3);cursor:pointer;font-size:13px;padding:4px;border-radius:4px;}
+.dict-close:hover{color:var(--text2);}
+.dict-word{font-size:20px;font-weight:700;color:var(--text);margin-bottom:1px;}
+.dict-phon{font-size:12px;color:var(--purple);margin-bottom:10px;}
+.dict-pos{font-size:10px;color:var(--amber);font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;}
+.dict-def{font-size:13px;color:var(--text2);line-height:1.55;margin-bottom:5px;}
+.dict-ex{font-size:11px;color:var(--text3);font-style:italic;border-left:2px solid var(--border);padding-left:8px;}
+.dict-loading{font-size:13px;color:var(--text3);text-align:center;padding:8px 0;}
+.dict-none{font-size:12px;color:var(--text3);margin-top:6px;}
+
+/* ═══════════════════════════════ LEARNING CONSOLE ═══════════════════════════════ */
+.lc{
+    height:var(--console-h);background:rgba(13,13,24,.98);
+    border-top:1px solid var(--border);
+    display:flex;align-items:center;padding:0 22px;gap:24px;flex-shrink:0;
+}
+.lc-group{display:flex;flex-direction:column;gap:6px;}
+.lc-label{font-size:10px;color:var(--text3);font-weight:700;text-transform:uppercase;letter-spacing:.6px;}
+.lc-row{display:flex;gap:4px;align-items:center;}
+.lb{
+    padding:5px 9px;background:var(--card-bg);border:1px solid var(--border);
+    border-radius:7px;color:var(--text2);font-size:12px;font-weight:600;
+    cursor:pointer;transition:all .15s;white-space:nowrap;
+    display:flex;align-items:center;gap:4px;
+}
+.lb:hover{background:var(--card-hover);color:var(--text);}
+.lb.active{background:rgba(168,85,247,.18);border-color:rgba(168,85,247,.45);color:#c084fc;}
+.lb.loop-on{background:rgba(16,185,129,.12);border-color:rgba(16,185,129,.35);color:var(--green);}
+.lb.danger{background:rgba(248,113,113,.08);border-color:rgba(248,113,113,.25);color:#f87171;}
+.lc-div{width:1px;height:52px;background:var(--border);flex-shrink:0;}
+
+/* ═══════════════════════════════ TOAST ═══════════════════════════════ */
+.toast-wrap{position:fixed;bottom:18px;right:18px;z-index:300;display:flex;flex-direction:column;gap:7px;}
+.toast{
+    background:rgba(18,18,30,.97);backdrop-filter:blur(16px);
+    border:1px solid var(--border);padding:11px 16px;border-radius:11px;
+    font-size:13px;color:var(--text);display:flex;align-items:center;gap:9px;
+    box-shadow:0 8px 24px rgba(0,0,0,.4);animation:slideIn .22s ease;max-width:300px;
+}
+.toast.success{border-left:3px solid var(--green);}
+.toast.info{border-left:3px solid var(--purple);}
+@keyframes slideIn{from{transform:translateX(18px);opacity:0;}to{transform:translateX(0);opacity:1;}}
+
+/* spinner */
+.spinner{width:28px;height:28px;border:2.5px solid var(--border);border-top-color:var(--purple);border-radius:50%;animation:spin .8s linear infinite;margin:36px auto;}
+@keyframes spin{to{transform:rotate(360deg);}}
+</style>
+</head>
+<body>
+
+<!-- ═══════════════ SIDEBAR ═══════════════ -->
+<aside class="sidebar" id="sidebar">
+<div class="sidebar-inner">
+    <div class="sidebar-hd">
+        <div class="logo-wrap">
+            <div class="logo-name"><i class="fa-solid fa-headphones" style="font-size:13px"></i> Podcast Learner</div>
+            <div class="logo-tag">RSS · AI Subtitles · Personal Use</div>
+        </div>
+        <button class="sidebar-close" onclick="toggleSidebar()" title="Collapse">
+            <i class="fa-solid fa-chevron-left"></i>
+        </button>
+    </div>
+
+    <div class="sidebar-tabs">
+        <button class="stab active" id="stab-plaza" onclick="showTab('plaza')">
+            <i class="fa-solid fa-globe"></i> Plaza
+        </button>
+        <button class="stab" id="stab-notebook" onclick="showTab('notebook')">
+            <i class="fa-solid fa-bookmark"></i> Notebook <span id="nbBadge" style="display:none;background:var(--purple);color:#fff;border-radius:99px;padding:0 5px;font-size:10px;margin-left:2px;">0</span>
+        </button>
+    </div>
+
+    <!-- PLAZA TAB -->
+    <div id="tab-plaza" class="sidebar-body">
+        <div class="search-row">
+            <input type="text" id="searchInput" placeholder="Search podcasts, paste RSS URL..." onkeyup="handleKey(event)">
+            <button onclick="doSearch()"><i class="fa-solid fa-magnifying-glass"></i></button>
+        </div>
+        <div class="region-row">
+            <button class="rbtn active" id="rb-us" onclick="switchRegion('us')">United States</button>
+            <button class="rbtn" id="rb-gb" onclick="switchRegion('gb')">United Kingdom</button>
+            <button class="rbtn" id="rb-au" onclick="switchRegion('au')">Australia</button>
+            <button class="rbtn" id="rb-ca" onclick="switchRegion('ca')">Canada</button>
+            <button class="rbtn" id="rb-jp" onclick="switchRegion('jp')">Japan</button>
+            <button class="rbtn" id="rb-de" onclick="switchRegion('de')">Germany</button>
+            <button class="rbtn" id="rb-fr" onclick="switchRegion('fr')">France</button>
+            <button class="rbtn" id="rb-es" onclick="switchRegion('es')">Spain</button>
+            <button class="rbtn" id="rb-kr" onclick="switchRegion('kr')">Korea</button>
+        </div>
+        <div class="preset-row">
+            <div class="chip" onclick="preset('The Daily')">The Daily</div>
+            <div class="chip" onclick="preset('Joe Rogan')">Joe Rogan</div>
+            <div class="chip" onclick="preset('Huberman Lab')">Huberman Lab</div>
+            <div class="chip" onclick="preset('Lex Fridman')">Lex Fridman</div>
+            <div class="chip" onclick="preset('Crime Junkie')">Crime Junkie</div>
+            <div class="chip" onclick="preset('NPR News Now')">NPR News</div>
+            <div class="chip" onclick="preset('Dateline NBC')">Dateline NBC</div>
+        </div>
+        <div id="plazaContent"><div class="spinner"></div></div>
+    </div>
+
+    <!-- NOTEBOOK TAB -->
+    <div id="tab-notebook" class="sidebar-body" style="display:none">
+        <div class="nb-hd">
+            <span class="nb-count" id="nbCount">0 sentences saved</span>
+            <button class="export-btn" onclick="exportNotebook()">
+                <i class="fa-solid fa-arrow-up-from-bracket"></i> Export
+            </button>
+        </div>
+        <div id="nbList"></div>
+    </div>
+</div>
+</aside>
+
+<!-- floating reopen button -->
+<button id="sidebarOpenBtn" onclick="toggleSidebar()">
+    <i class="fa-solid fa-bars"></i>
+</button>
+
+<!-- ═══════════════ MAIN ═══════════════ -->
+<main class="main" id="main">
+
+    <!-- Player bar (hidden until episode plays) -->
+    <div class="player-bar" id="playerBar" style="display:none">
+        <img class="pb-cover" id="pbCover" src="" alt="">
+        <div class="pb-info">
+            <div class="pb-title" id="pbTitle">—</div>
+            <div class="pb-author" id="pbAuthor">—</div>
+        </div>
+        <div class="pb-progress">
+            <span class="pb-time" id="pbCur">0:00</span>
+            <div class="prog-bar" id="progBar" onclick="seekAudio(event)">
+                <div class="prog-fill" id="progFill" style="width:0%"></div>
+            </div>
+            <span class="pb-time" id="pbTot">0:00</span>
+        </div>
+        <div class="pb-ctrl">
+            <button class="cbtn" onclick="skipAudio(-10)" title="-10s"><i class="fa-solid fa-rotate-left"></i></button>
+            <button class="cbtn play" id="playBtn" onclick="togglePlay()"><i class="fa-solid fa-play"></i></button>
+            <button class="cbtn" onclick="skipAudio(30)" title="+30s"><i class="fa-solid fa-rotate-right"></i></button>
+        </div>
+    </div>
+
+    <!-- Welcome screen -->
+    <div class="welcome" id="welcome">
+        <i class="fa-solid fa-headphones-simple"></i>
+        <h2>Pick a podcast to start learning</h2>
+        <p>Browse the Plaza in the sidebar, click a show, then select an episode. The subtitle panel will activate here.</p>
+    </div>
+
+    <!-- Subtitle panel (shown when playing) -->
+    <div class="sub-panel" id="subPanel" style="display:none">
+        <div class="sub-hd">
+            <div class="sub-hd-left">
+                <i class="fa-solid fa-closed-captioning" style="color:var(--purple)"></i>
+                Live Subtitles
+                <span class="sub-badge" id="subBadge" style="background:rgba(100,116,139,.2);color:#94a3b8;border-color:rgba(100,116,139,.3)">Loading...</span>
+            </div>
+            <div class="sub-actions">
+                <span style="font-size:11px;color:var(--text3)">Click word → lookup &nbsp;·&nbsp; <i class="fa-regular fa-bookmark"></i> → save</span>
+                <button class="refresh-btn" id="refreshBtn" onclick="triggerAiTranscribe()">
+                    <i class="fa-solid fa-rotate"></i> Refresh
+                </button>
+            </div>
+        </div>
+        <div class="sub-scroll" id="subScroll"></div>
+    </div>
+
+    <!-- Learning console (shown when playing) -->
+    <div class="lc" id="lc" style="display:none">
+        <!-- Speed -->
+        <div class="lc-group">
+            <div class="lc-label"><i class="fa-solid fa-gauge-high"></i> Speed</div>
+            <div class="lc-row" id="speedRow">
+                <button class="lb" onclick="setSpeed(0.6)">0.6×</button>
+                <button class="lb" onclick="setSpeed(0.75)">0.75×</button>
+                <button class="lb active" onclick="setSpeed(1.0)">1.0×</button>
+                <button class="lb" onclick="setSpeed(1.25)">1.25×</button>
+                <button class="lb" onclick="setSpeed(1.5)">1.5×</button>
+                <button class="lb" onclick="setSpeed(2.0)">2.0×</button>
+            </div>
+        </div>
+
+        <div class="lc-div"></div>
+
+        <!-- A-B Loop -->
+        <div class="lc-group">
+            <div class="lc-label"><i class="fa-solid fa-repeat"></i> A-B Loop</div>
+            <div class="lc-row">
+                <button class="lb" id="btnA" onclick="setLoopA()">
+                    <i class="fa-solid fa-flag" style="color:var(--green)"></i>
+                    A: <span id="lblA" style="color:var(--text3)">--</span>
+                </button>
+                <button class="lb" id="btnB" onclick="setLoopB()">
+                    <i class="fa-solid fa-flag-checkered" style="color:var(--pink)"></i>
+                    B: <span id="lblB" style="color:var(--text3)">--</span>
+                </button>
+                <button class="lb" id="btnLoop" onclick="toggleLoop()">
+                    <i class="fa-solid fa-repeat"></i> Loop
+                </button>
+                <button class="lb danger" onclick="clearLoop()" title="Clear A-B">
+                    <i class="fa-solid fa-xmark"></i> Clear
+                </button>
+            </div>
+        </div>
+
+        <div class="lc-div"></div>
+
+        <!-- Attribution -->
+        <div style="font-size:10px;color:var(--text3);line-height:1.7;margin-left:auto;text-align:right;flex-shrink:0;">
+            <div><i class="fa-solid fa-shield-halved" style="color:var(--green)"></i> Audio from original RSS source</div>
+            <div><i class="fa-solid fa-copyright" style="color:var(--purple)"></i> © original creators · personal use</div>
+        </div>
+    </div>
+
+</main>
+
+<!-- Dictionary popup -->
+<div id="dictPopup" style="display:none">
+    <button class="dict-close" onclick="closeDictPopup()"><i class="fa-solid fa-xmark"></i></button>
+    <div id="dictContent"></div>
+</div>
+
+<!-- Audio element -->
+<audio id="ga"></audio>
+
+<!-- Toasts -->
+<div class="toast-wrap" id="toastWrap"></div>
+
+<script>
+// ══════════════════════════════════════════════
+//  STATE
+// ══════════════════════════════════════════════
+const audio = document.getElementById('ga');
+let country = 'us';
+let currentFeed = null;
+let currentMeta = null;
+let currentEpisodes = [];
+let nowPlaying = null;       // { url, title, author, cover, transcriptUrl, description }
+let cues = [];               // { start, end, text }[]
+let activeCue = -1;
+let isTranscribing = false;
+let savedCues = new Set();   // indices saved for this episode
+let notebook = [];           // persisted
+let sidebarOpen = true;
+
+// A-B
+let loopA = null, loopB = null, loopOn = false;
+// Speed
+let speed = 1.0;
+
+// ══════════════════════════════════════════════
+//  SIDEBAR
+// ══════════════════════════════════════════════
+function toggleSidebar() {
+    sidebarOpen = !sidebarOpen;
+    document.getElementById('sidebar').classList.toggle('collapsed', !sidebarOpen);
+    document.getElementById('sidebarOpenBtn').style.display = sidebarOpen ? 'none' : 'flex';
+}
+
+function showTab(tab) {
+    ['plaza','notebook'].forEach(t => {
+        document.getElementById(`tab-${t}`).style.display = t === tab ? 'block' : 'none';
+        document.getElementById(`stab-${t}`).classList.toggle('active', t === tab);
+    });
+    if (tab === 'notebook') renderNotebook();
+}
+
+// ══════════════════════════════════════════════
+//  PLAZA
+// ══════════════════════════════════════════════
+function switchRegion(c) {
+    country = c;
+    document.querySelectorAll('.rbtn').forEach(b => b.classList.remove('active'));
+    const rb = document.getElementById(`rb-${c}`);
+    if (rb) rb.classList.add('active');
+    loadTopCharts(c);
+}
+
+async function loadTopCharts(c = 'us') {
+    setPlaza('<div class="spinner"></div>');
+    try {
+        const res = await fetch(`/api/top-charts?country=${c}&limit=30`);
+        const data = await res.json();
+        renderTopCharts(data.results);
+    } catch(e) {
+        setPlaza(`<div style="padding:24px;text-align:center;color:var(--text3);font-size:13px">Failed to load: ${e.message}</div>`);
+    }
+}
+
+function renderTopCharts(results) {
+    let h = '<div class="sec-label"><i class="fa-solid fa-chart-line" style="color:var(--purple)"></i> Top 30</div><div class="pod-grid">';
+    results.forEach((r, i) => {
+        const img = hd(r.artworkUrl600);
+        h += `<div class="pod-card" onclick="loadPodcast('${r.collectionId}')">
+            <div class="rank-badge">#${i+1}</div>
+            ${r.hasTranscript ? '<div class="cc-dot"><i class="fa-solid fa-closed-captioning" style="font-size:7px;color:#fff"></i></div>' : ''}
+            <img src="${img}" loading="lazy" alt="">
+            <div class="pod-card-info">
+                <div class="pod-card-title">${esc(r.collectionName)}</div>
+                <div class="pod-card-artist">${esc(r.artistName)}</div>
+            </div>
+        </div>`;
+    });
+    h += '</div>';
+    setPlaza(h);
+}
+
+function preset(term) {
+    document.getElementById('searchInput').value = term;
+    doSearch();
+}
+
+function handleKey(e) { if (e.key === 'Enter') doSearch(); }
+
+async function doSearch() {
+    const q = document.getElementById('searchInput').value.trim();
+    if (!q) return;
+    setPlaza('<div class="spinner"></div>');
+    try {
+        const res = await fetch(`/api/search?query=${encodeURIComponent(q)}&country=${country}`);
+        const data = await res.json();
+        if (data.feedData) {
+            currentMeta = data;
+            currentFeed = data.feedData;
+            currentEpisodes = data.feedData.episodes || [];
+            renderChannel(data.feedData, data);
+        } else if (data.results) {
+            renderSearchResults(data.results);
+        }
+    } catch(e) { toast('Search failed: ' + e.message); }
+}
+
+function renderSearchResults(results) {
+    if (!results.length) { setPlaza('<div style="padding:24px;text-align:center;color:var(--text3);font-size:13px">No results.</div>'); return; }
+    let h = '<div class="sec-label">Search Results</div><div class="pod-grid">';
+    results.forEach(r => {
+        h += `<div class="pod-card" onclick="loadPodcast('${r.collectionId}')">
+            <img src="${hd(r.artworkUrl600)}" loading="lazy" alt="">
+            <div class="pod-card-info">
+                <div class="pod-card-title">${esc(r.collectionName)}</div>
+                <div class="pod-card-artist">${esc(r.artistName)}</div>
+            </div>
+        </div>`;
+    });
+    h += '</div>';
+    setPlaza(h);
+}
+
+async function loadPodcast(id) {
+    setPlaza('<div class="spinner"></div>');
+    try {
+        const res = await fetch(`/api/lookup?id=${id}&country=${country}`);
+        const data = await res.json();
+        currentMeta = data;
+        currentFeed = data.feedData;
+        currentEpisodes = (data.feedData || {}).episodes || [];
+        renderChannel(data.feedData, data);
+    } catch(e) { toast('Failed to load: ' + e.message); }
+}
+
+function renderChannel(feed, meta) {
+    const cover = hd(feed.image || meta.artworkUrl600 || '');
+    const author = feed.author || meta.artistName || '';
+
+    let h = `<div class="channel-hd">
+        <button class="back-btn" onclick="loadTopCharts(country)">
+            <i class="fa-solid fa-chevron-left"></i> Plaza
+        </button>
+        <div class="chan-mini">
+            <img src="${cover}" alt="">
+            <div>
+                <div class="chan-mini-title">${esc(feed.title || meta.collectionName)}</div>
+                <div class="chan-mini-author">${esc(author)}</div>
+            </div>
+        </div>
+    </div><div class="ep-list">`;
+
+    (feed.episodes || []).forEach((ep, idx) => {
+        const isNow = nowPlaying && nowPlaying.url === ep.audioUrl;
+        h += `<div class="ep-item ${isNow ? 'playing' : ''}" onclick="playByIdx(${idx},'${escQ(cover)}','${escQ(author)}')">
+            <div class="ep-icon"><i class="fa-solid ${isNow ? 'fa-volume-high' : 'fa-play'}"></i></div>
+            <div class="ep-info">
+                <div class="ep-title">${esc(ep.title)}</div>
+                <div class="ep-meta-s">
+                    ${ep.pubDate ? ep.pubDate.substring(0,10) : ''}
+                    ${ep.duration ? ' · ' + ep.duration : ''}
+                    ${ep.transcriptUrl ? ' · <span style="color:var(--amber)">CC</span>' : ''}
+                </div>
+            </div>
+        </div>`;
+    });
+
+    h += '</div>';
+    setPlaza(h);
+}
+
+function setPlaza(html) {
+    document.getElementById('plazaContent').innerHTML = html;
+}
+
+// ══════════════════════════════════════════════
+//  PLAYER
+// ══════════════════════════════════════════════
+function playByIdx(idx, cover, author) {
+    const ep = currentEpisodes[idx];
+    if (!ep) return;
+    startPlay(ep.audioUrl, ep.title, author, cover, ep.transcriptUrl || '', ep.description || '');
+}
+
+function startPlay(url, title, author, cover, transcriptUrl, description) {
+    nowPlaying = { url, title, author, cover, transcriptUrl, description };
+    savedCues = new Set();
+
+    // Update player bar
+    document.getElementById('pbCover').src = hd(cover);
+    document.getElementById('pbTitle').textContent = title;
+    document.getElementById('pbAuthor').textContent = author;
+    document.getElementById('playerBar').style.display = 'flex';
+
+    // Show panels
+    document.getElementById('welcome').style.display = 'none';
+    document.getElementById('subPanel').style.display = 'flex';
+    document.getElementById('lc').style.display = 'flex';
+
+    // Reset A-B
+    clearLoop();
+
+    if (audio.src !== url) audio.src = url;
+    audio.playbackRate = speed;
+    audio.play();
+    setPlayIcon(true);
+
+    loadSubtitles(url, title, transcriptUrl, description);
+}
+
+function togglePlay() {
+    if (audio.paused) { audio.play(); setPlayIcon(true); }
+    else { audio.pause(); setPlayIcon(false); }
+}
+
+function setPlayIcon(playing) {
+    document.getElementById('playBtn').innerHTML =
+        `<i class="fa-solid ${playing ? 'fa-pause' : 'fa-play'}"></i>`;
+}
+
+function skipAudio(s) { audio.currentTime = Math.max(0, audio.currentTime + s); }
+
+function seekAudio(e) {
+    const bar = e.currentTarget;
+    const pct = (e.clientX - bar.getBoundingClientRect().left) / bar.offsetWidth;
+    if (audio.duration) audio.currentTime = pct * audio.duration;
+}
+
+audio.ontimeupdate = () => {
+    if (!audio.duration) return;
+    const pct = (audio.currentTime / audio.duration) * 100;
+    document.getElementById('progFill').style.width = pct + '%';
+    document.getElementById('pbCur').textContent = ft(audio.currentTime);
+    document.getElementById('pbTot').textContent = ft(audio.duration);
+    syncSubs(audio.currentTime);
+
+    // A-B loop enforcement
+    if (loopOn && loopA !== null && loopB !== null && audio.currentTime >= loopB) {
+        audio.currentTime = loopA;
+    }
+};
+audio.onended = () => setPlayIcon(false);
+audio.onpause = () => setPlayIcon(false);
+audio.onplay  = () => setPlayIcon(true);
+
+// ══════════════════════════════════════════════
+//  SPEED
+// ══════════════════════════════════════════════
+function setSpeed(r) {
+    speed = r;
+    audio.playbackRate = r;
+    document.querySelectorAll('#speedRow .lb').forEach(b => {
+        b.classList.toggle('active', parseFloat(b.textContent) === r);
+    });
+    toast(`Speed: ${r}×`, 'info');
+}
+
+// ══════════════════════════════════════════════
+//  A-B LOOP
+// ══════════════════════════════════════════════
+function setLoopA() {
+    loopA = audio.currentTime;
+    document.getElementById('lblA').textContent = ft(loopA);
+    document.getElementById('lblA').style.color = 'var(--green)';
+    document.getElementById('btnA').classList.add('active');
+    toast(`A → ${ft(loopA)}`, 'info');
+}
+
+function setLoopB() {
+    loopB = audio.currentTime;
+    document.getElementById('lblB').textContent = ft(loopB);
+    document.getElementById('lblB').style.color = 'var(--pink)';
+    document.getElementById('btnB').classList.add('active');
+    toast(`B → ${ft(loopB)}`, 'info');
+}
+
+function toggleLoop() {
+    if (loopA === null || loopB === null) { toast('Set A and B first', 'info'); return; }
+    loopOn = !loopOn;
+    const btn = document.getElementById('btnLoop');
+    if (loopOn) {
+        btn.classList.add('loop-on');
+        btn.innerHTML = '<i class="fa-solid fa-repeat"></i> Loop ON';
+        audio.currentTime = loopA;
+        toast(`Loop: ${ft(loopA)} → ${ft(loopB)}`, 'info');
+    } else {
+        btn.classList.remove('loop-on');
+        btn.innerHTML = '<i class="fa-solid fa-repeat"></i> Loop';
+    }
+}
+
+function clearLoop() {
+    loopA = null; loopB = null; loopOn = false;
+    ['A','B'].forEach(x => {
+        document.getElementById(`lbl${x}`).textContent = '--';
+        document.getElementById(`lbl${x}`).style.color = 'var(--text3)';
+        document.getElementById(`btn${x}`).classList.remove('active');
+    });
+    const btn = document.getElementById('btnLoop');
+    btn.classList.remove('loop-on');
+    btn.innerHTML = '<i class="fa-solid fa-repeat"></i> Loop';
+}
+
+// ══════════════════════════════════════════════
+//  SUBTITLES
+// ══════════════════════════════════════════════
+async function loadSubtitles(audioUrl, title, transcriptUrl, description) {
+    cues = [];
+    activeCue = -1;
+
+    // Step 1: description preview
+    const src = (description && description.length > 20) ? description : title;
+    const sentences = src.split(/(?<=[.!?])\s+/).filter(s => s.trim());
+    let t = 0;
+    sentences.forEach(s => {
+        const dur = Math.max(3.5, s.length * 0.22);
+        cues.push({ start: t, end: t + dur, text: s.trim() });
+        t += dur + 0.3;
+    });
+    setBadge('📄 Description Preview', 'rgba(100,116,139,.18)', '#94a3b8', 'rgba(100,116,139,.3)');
+    renderSubs(true);
+
+    // Step 2: official VTT
+    if (transcriptUrl) {
+        try {
+            toast('Fetching official transcript...', 'info');
+            const res = await fetch(`/api/transcribe?audio_url=${enc(audioUrl)}&title=${enc(title)}&transcript_url=${enc(transcriptUrl)}`);
+            const data = await res.json();
+            if (data.vtt && data.vtt.trim().length > 10) {
+                const parsed = parseVtt(data.vtt);
+                if (parsed.length > 0) {
+                    cues = parsed;
+                    setBadge('✅ Official Transcript', 'rgba(245,158,11,.15)', '#fbbf24', 'rgba(245,158,11,.3)');
+                    renderSubs(false);
+                    toast('Official transcript loaded.', 'success');
+                    return;
+                }
+            }
+        } catch(e) { console.log('VTT fetch:', e); }
+    }
+
+    // Step 3: Whisper
+    triggerAiTranscribe(true);
+}
+
+async function triggerAiTranscribe(auto = false) {
+    if (!nowPlaying || isTranscribing) return;
+    isTranscribing = true;
+    const btn = document.getElementById('refreshBtn');
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Transcribing...';
+    setBadge('🤖 AI transcribing...', 'rgba(59,130,246,.15)', '#93c5fd', 'rgba(59,130,246,.3)');
+    if (!auto) toast('Whisper AI is transcribing...', 'info');
+
+    try {
+        const res = await fetch(`/api/transcribe?audio_url=${enc(nowPlaying.url)}&title=${enc(nowPlaying.title)}&transcript_url=`);
+        const data = await res.json();
+        isTranscribing = false;
+        btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Refresh';
+        if (data.vtt && data.vtt.trim().length > 10) {
+            const parsed = parseVtt(data.vtt);
+            if (parsed.length > 0) {
+                cues = parsed;
+                setBadge('🤖 AI-generated (Whisper)', 'rgba(168,85,247,.15)', '#c084fc', 'rgba(168,85,247,.3)');
+                renderSubs(false);
+                toast('✅ AI subtitles ready — assistive use only', 'success');
+                return;
+            }
+        }
+        toast('AI transcription returned no results.', 'info');
+    } catch(e) {
+        isTranscribing = false;
+        btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Refresh';
+        toast('Transcription error: ' + e.message, 'info');
+    }
+}
+
+function setBadge(text, bg, color, border) {
+    const b = document.getElementById('subBadge');
+    b.textContent = text;
+    b.style.background = bg;
+    b.style.color = color;
+    b.style.borderColor = border;
+}
+
+function renderSubs(isPreview = false) {
+    const el = document.getElementById('subScroll');
+    if (!cues.length) {
+        el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3);font-size:13px">No subtitles available yet.</div>';
+        return;
+    }
+    let h = '';
+    if (isPreview) {
+        h += `<div class="preview-alert">
+            <i class="fa-solid fa-triangle-exclamation"></i>
+            <span>No official transcript — showing episode description as placeholder. AI (Whisper) generating subtitles in background...</span>
+        </div>`;
+    }
+    cues.forEach((c, i) => {
+        const saved = savedCues.has(i);
+        h += `<div class="sub-line" id="cue-${i}" onclick="jumpTo(${c.start})">
+            <span class="sub-ts">${ft(c.start)}</span>
+            <span class="sub-txt">${wordSpans(c.text, i)}</span>
+            <button class="save-btn ${saved ? 'saved' : ''}" id="sbtn-${i}"
+                onclick="saveSentence(event,${i})" title="${saved ? 'Saved' : 'Save to notebook'}">
+                <i class="fa-${saved ? 'solid' : 'regular'} fa-bookmark"></i>
+            </button>
+        </div>`;
+    });
+    el.innerHTML = h;
+}
+
+function wordSpans(text, cueIdx) {
+    return text.split(/(\s+)/).map(tok => {
+        if (/^\s+$/.test(tok)) return tok;
+        const word = tok.replace(/[^a-zA-Z'']/g, '');
+        if (!word || word.length < 2) return `<span>${escHtml(tok)}</span>`;
+        return `<span class="word" onclick="lookupWord('${word.toLowerCase()}',event)">${escHtml(tok)}</span>`;
+    }).join('');
+}
+
+function jumpTo(secs) {
+    audio.currentTime = secs;
+    if (audio.paused) audio.play();
+}
+
+function syncSubs(t) {
+    if (!cues.length) return;
+    let found = -1;
+    for (let i = 0; i < cues.length; i++) {
+        if (t >= cues[i].start && t <= cues[i].end) { found = i; break; }
+        if (t < cues[i].start) { found = Math.max(0, i - 1); break; }
+    }
+    if (found === -1 && t > cues[cues.length-1].start) found = cues.length - 1;
+    if (found !== -1 && found !== activeCue) {
+        if (activeCue !== -1) {
+            const prev = document.getElementById(`cue-${activeCue}`);
+            if (prev) prev.classList.remove('active');
+        }
+        activeCue = found;
+        const el = document.getElementById(`cue-${found}`);
+        if (el) { el.classList.add('active'); el.scrollIntoView({ behavior:'smooth', block:'center' }); }
+    }
+}
+
+function parseVtt(text) {
+    if (!text) return [];
+    const result = [];
+    const blocks = text.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n\n');
+    for (const block of blocks) {
+        const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
+        const ti = lines.findIndex(l => l.includes('-->'));
+        if (ti === -1) continue;
+        const parts = lines[ti].split('-->');
+        if (parts.length < 2) continue;
+        const start = ts(parts[0].trim());
+        const end   = ts(parts[1].split(' ')[0].trim());
+        const txt   = lines.slice(ti+1)
+            .map(l => l.replace(/<[^>]+>/g,'').trim())
+            .filter(l => l && !l.startsWith('WEBVTT') && !l.startsWith('NOTE'))
+            .join(' ').trim();
+        if (txt) result.push({ start, end, text: txt });
+    }
+    return result;
+}
+
+function ts(s) {
+    if (!s) return 0;
+    const p = s.replace(',','.').split(':');
+    if (p.length === 3) return +p[0]*3600 + +p[1]*60 + +p[2];
+    if (p.length === 2) return +p[0]*60 + +p[1];
+    return +p[0] || 0;
+}
+
+// ══════════════════════════════════════════════
+//  DICTIONARY
+// ══════════════════════════════════════════════
+let dictVisible = false;
+
+function positionDictPopup(targetRect) {
+    const popup = document.getElementById('dictPopup');
+    if (!popup || popup.style.display === 'none') return;
+
+    const pad = 12;
+    const viewportW = window.innerWidth;
+    const viewportH = window.innerHeight;
+    const popupRect = popup.getBoundingClientRect();
+
+    let top = targetRect ? (targetRect.bottom + 6) : 100;
+    let left = targetRect ? targetRect.left : 100;
+
+    // Vertical overflow check: place above word if below extends off screen
+    if (top + popupRect.height > viewportH - pad) {
+        if (targetRect && targetRect.top - popupRect.height - 6 > pad) {
+            top = targetRect.top - popupRect.height - 6;
+        } else {
+            top = Math.max(pad, viewportH - popupRect.height - pad);
+        }
+    }
+
+    // Horizontal overflow check
+    if (left + popupRect.width > viewportW - pad) {
+        left = Math.max(pad, viewportW - popupRect.width - pad);
+    }
+    if (left < pad) {
+        left = pad;
+    }
+
+    popup.style.left = left + 'px';
+    popup.style.top = top + 'px';
+}
+
+async function lookupWord(word, e) {
+    e.stopPropagation();
+    const popup = document.getElementById('dictPopup');
+    const content = document.getElementById('dictContent');
+    const targetRect = e.currentTarget ? e.currentTarget.getBoundingClientRect() : null;
+
+    popup.style.display = 'block';
+    dictVisible = true;
+    content.innerHTML = '<div class="dict-loading"><i class="fa-solid fa-sparkles" style="color:var(--purple)"></i> Gemini AI 检索中 <strong>' + escHtml(word) + '</strong>...</div>';
+
+    // Initial positioning
+    positionDictPopup(targetRect);
+
+    // Get current sentence context if available
+    let contextSentence = "";
+    if (activeCue >= 0 && cues[activeCue]) {
+        contextSentence = cues[activeCue].text || "";
+    }
+
+    const renderAndUpdatePos = (html) => {
+        content.innerHTML = html;
+        requestAnimationFrame(() => positionDictPopup(targetRect));
+    };
+
+    try {
+        const res = await fetch(`/api/define?word=${encodeURIComponent(word)}&context=${encodeURIComponent(contextSentence)}`);
+        const json = await res.json();
+        if (json.status === 'success' && json.data) {
+            const d = json.data;
+            let h = `<div style="display:flex;align-items:center;justify-content:space-between;">
+                <div class="dict-word">${escHtml(d.word || word)}</div>
+                <span style="font-size:10px;background:rgba(168,85,247,0.2);color:#c084fc;padding:2px 6px;border-radius:4px;font-weight:600;"><i class="fa-solid fa-wand-magic-sparkles"></i> Gemini AI</span>
+            </div>`;
+            if (d.phonetic) h += `<div class="dict-phon">${escHtml(d.phonetic)}</div>`;
+            if (d.translation_cn) h += `<div style="font-size:14px;font-weight:700;color:#f3f4f6;margin:6px 0 4px;border-bottom:1px solid rgba(255,255,255,0.08);padding-bottom:4px;">🇨🇳 ${escHtml(d.translation_cn)}</div>`;
+            if (d.definition_en) {
+                h += `<div class="dict-pos">${escHtml(d.pos || '')}</div>`;
+                h += `<div class="dict-def">${escHtml(d.definition_en)}</div>`;
+            }
+            if (d.example) {
+                h += `<div class="dict-ex">"${escHtml(d.example)}"<br><span style="color:var(--text2);font-style:normal;font-size:11px;">${escHtml(d.example_cn || '')}</span></div>`;
+            }
+            if (d.context_note) {
+                h += `<div style="margin-top:8px;font-size:11px;color:#fde68a;background:rgba(245,158,11,0.1);padding:5px 8px;border-radius:6px;"><i class="fa-solid fa-lightbulb"></i> 语境分析: ${escHtml(d.context_note)}</div>`;
+            }
+            renderAndUpdatePos(h);
+            return;
+        }
+        throw new Error('Gemini API return invalid format');
+    } catch(err) {
+        console.log('Gemini lookup fallback to free dictionary:', err);
+        try {
+            const res = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`);
+            if (!res.ok) throw new Error('not found');
+            const data = await res.json();
+            const entry = data[0];
+            const phon = entry.phonetic || (entry.phonetics||[]).find(p=>p.text)?.text || '';
+            const meanings = entry.meanings || [];
+
+            let h = `<div class="dict-word">${escHtml(entry.word)}</div>`;
+            if (phon) h += `<div class="dict-phon">${escHtml(phon)}</div>`;
+
+            meanings.slice(0,2).forEach(m => {
+                const d = m.definitions[0];
+                if (!d) return;
+                h += `<div class="dict-pos">${m.partOfSpeech}</div>`;
+                h += `<div class="dict-def">${escHtml(d.definition)}</div>`;
+                if (d.example) h += `<div class="dict-ex">"${escHtml(d.example)}"</div>`;
+            });
+
+            renderAndUpdatePos(h);
+        } catch(e) {
+            renderAndUpdatePos(`<div class="dict-word">${word}</div><div class="dict-none">No definition found.</div>`);
+        }
+    }
+}
+
+function closeDictPopup() {
+    document.getElementById('dictPopup').style.display = 'none';
+    dictVisible = false;
+}
+
+document.addEventListener('click', e => {
+    if (dictVisible && !e.target.closest('#dictPopup') && !e.target.classList.contains('word')) {
+        closeDictPopup();
+    }
+});
+
+// ══════════════════════════════════════════════
+//  NOTEBOOK
+// ══════════════════════════════════════════════
+function loadNotebook() {
+    try { notebook = JSON.parse(localStorage.getItem('pl_notebook') || '[]'); }
+    catch { notebook = []; }
+    updateNbBadge();
+}
+
+function saveNotebook() {
+    localStorage.setItem('pl_notebook', JSON.stringify(notebook));
+    updateNbBadge();
+}
+
+function updateNbBadge() {
+    const badge = document.getElementById('nbBadge');
+    if (notebook.length > 0) {
+        badge.style.display = 'inline';
+        badge.textContent = notebook.length;
+    } else {
+        badge.style.display = 'none';
+    }
+}
+
+function saveSentence(e, idx) {
+    e.stopPropagation();
+    const cue = cues[idx];
+    if (!cue || !nowPlaying) return;
+
+    if (savedCues.has(idx)) {
+        // Unsave
+        savedCues.delete(idx);
+        notebook = notebook.filter(n => !(n.epUrl === nowPlaying.url && Math.abs(n.start - cue.start) < 0.5));
+        saveNotebook();
+        updateSaveBtn(idx, false);
+        toast('Removed from notebook.', 'info');
+        return;
+    }
+
+    savedCues.add(idx);
+    notebook.unshift({
+        id: Date.now(),
+        text: cue.text,
+        start: cue.start,
+        epTitle: nowPlaying.title,
+        show: nowPlaying.author,
+        epUrl: nowPlaying.url,
+        savedAt: new Date().toISOString()
+    });
+    saveNotebook();
+    updateSaveBtn(idx, true);
+    toast('✅ Saved to notebook!', 'success');
+}
+
+function updateSaveBtn(idx, saved) {
+    const btn = document.getElementById(`sbtn-${idx}`);
+    if (!btn) return;
+    btn.className = `save-btn ${saved ? 'saved' : ''}`;
+    btn.innerHTML = `<i class="fa-${saved ? 'solid' : 'regular'} fa-bookmark"></i>`;
+    btn.title = saved ? 'Saved' : 'Save to notebook';
+}
+
+function renderNotebook() {
+    const list = document.getElementById('nbList');
+    document.getElementById('nbCount').textContent = `${notebook.length} sentence${notebook.length !== 1 ? 's' : ''} saved`;
+
+    if (!notebook.length) {
+        list.innerHTML = `<div class="nb-empty">
+            <i class="fa-regular fa-bookmark" style="font-size:36px;display:block;margin-bottom:12px;opacity:.4"></i>
+            No saved sentences yet.<br>
+            Hover a subtitle line and click <i class="fa-regular fa-bookmark"></i>.
+        </div>`;
+        return;
+    }
+
+    list.innerHTML = notebook.map(n => {
+        const date = new Date(n.savedAt).toLocaleDateString();
+        return `<div class="nb-entry" onclick="jumpFromNotebook('${escQ(n.epUrl)}',${n.start})">
+            <div class="nb-text">"${escHtml(n.text)}"</div>
+            <div class="nb-meta">
+                <i class="fa-solid fa-podcast" style="color:var(--purple)"></i>
+                ${escHtml(n.show)} · ${ft(n.start)} · ${date}
+                <button class="nb-del" onclick="deleteNb(event,${n.id})" title="Remove">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function jumpFromNotebook(epUrl, startTime) {
+    if (nowPlaying && nowPlaying.url === epUrl) {
+        audio.currentTime = startTime;
+        if (audio.paused) audio.play();
+        showTab('plaza');
+        toast(`↩ Jumped to ${ft(startTime)}`, 'info');
+    } else {
+        toast('Load this episode first to jump to timestamp.', 'info');
+    }
+}
+
+function deleteNb(e, id) {
+    e.stopPropagation();
+    notebook = notebook.filter(n => n.id !== id);
+    saveNotebook();
+    renderNotebook();
+}
+
+function exportNotebook() {
+    if (!notebook.length) { toast('Notebook is empty.', 'info'); return; }
+    const txt = notebook.map(n =>
+        `[${n.show} | ${n.epTitle} | ${ft(n.start)}]\n"${n.text}"\n`
+    ).join('\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([txt], { type: 'text/plain' }));
+    a.download = `podcast-notebook-${new Date().toISOString().slice(0,10)}.txt`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast(`Exported ${notebook.length} sentences.`, 'success');
+}
+
+// ══════════════════════════════════════════════
+//  UTILS
+// ══════════════════════════════════════════════
+function ft(sec) {
+    if (sec === null || sec === undefined) return '0:00';
+    const m = Math.floor(sec / 60), s = Math.floor(sec % 60);
+    return `${m}:${s < 10 ? '0' : ''}${s}`;
+}
+
+function hd(url) {
+    if (!url) return 'https://via.placeholder.com/300';
+    if (url.includes('mzstatic.com'))
+        return url.replace(/\d+x\d+bb\.(png|jpg|jpeg)/,'1200x1200bb.jpg').replace(/\d+x\d+bb/,'1200x1200bb');
+    return url;
+}
+
+function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escHtml(s) { return esc(s).replace(/"/g,'&quot;'); }
+function escQ(s) { return (s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
+function enc(s) { return encodeURIComponent(s||''); }
+
+function toast(msg, type = 'info') {
+    const wrap = document.getElementById('toastWrap');
+    const el = document.createElement('div');
+    el.className = `toast ${type}`;
+    el.innerHTML = `<i class="fa-solid ${type==='success' ? 'fa-circle-check' : 'fa-circle-info'}"></i> ${msg}`;
+    wrap.appendChild(el);
+    setTimeout(() => {
+        el.style.opacity = '0';
+        el.style.transition = 'opacity .3s';
+        setTimeout(() => el.remove(), 300);
+    }, 3200);
+}
+
+function enableHorizontalScroll() {
+    document.querySelectorAll('.region-row, .preset-row').forEach(row => {
+        // Mouse wheel vertical -> horizontal scroll
+        row.addEventListener('wheel', (e) => {
+            if (e.deltaY !== 0) {
+                e.preventDefault();
+                row.scrollLeft += e.deltaY;
+            }
+        }, { passive: false });
+
+        // Mouse click and drag
+        let isDown = false;
+        let startX, scrollLeft;
+
+        row.addEventListener('mousedown', (e) => {
+            if (e.target.tagName === 'BUTTON' || e.target.classList.contains('chip') || e.target.classList.contains('rbtn')) {
+                // Ignore button clicks unless dragging
+            }
+            isDown = true;
+            startX = e.pageX - row.offsetLeft;
+            scrollLeft = row.scrollLeft;
+        });
+
+        row.addEventListener('mouseleave', () => { isDown = false; });
+        row.addEventListener('mouseup', () => { isDown = false; });
+        row.addEventListener('mousemove', (e) => {
+            if (!isDown) return;
+            const x = e.pageX - row.offsetLeft;
+            const walk = (x - startX) * 1.5;
+            if (Math.abs(walk) > 5) {
+                row.scrollLeft = scrollLeft - walk;
+            }
+        });
+    });
+}
+
+// ══════════════════════════════════════════════
+//  INIT
+// ══════════════════════════════════════════════
+window.onload = () => {
+    loadNotebook();
+    loadTopCharts('us');
+    enableHorizontalScroll();
+};
+</script>
+</body>
+</html>
