@@ -13,8 +13,9 @@ def adb(*arguments, **kwargs):
     return subprocess.run(['adb', *(['-s', SERIAL] if SERIAL else []), *arguments], check=True, **kwargs)
 
 if __name__ == '__main__':
+    # Older builds used a USB reverse tunnel on this port. Release it for the device-local server.
+    subprocess.run(['adb', *(['-s', SERIAL] if SERIAL else []), 'reverse', '--remove', 'tcp:8557'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     adb('install', '-r', str(ROOT / 'android/app/build/outputs/apk/debug/app-debug.apk'))
-    adb('reverse', 'tcp:8557', 'tcp:8557')
     config = dotenv_values(ROOT / '.env')
     fields = {'groq_key_1': config.get('GROQ_API_KEY_1') or config.get('GROQ_API_KEY'),
               'groq_key_2': config.get('GROQ_API_KEY_2'), 'gemini_key': config.get('GEMINI_API_KEY')}

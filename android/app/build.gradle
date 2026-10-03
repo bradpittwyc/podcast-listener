@@ -6,7 +6,14 @@ android {
         applicationId 'com.podcastlearner.tablet'
         minSdk 23
         targetSdk 34
-        versionCode 1
-        versionName '1.0'
+        versionCode 2
+        versionName '2.0'
     }
+    sourceSets.main.assets.srcDir layout.buildDirectory.dir('generated/assets')
 }
+tasks.register('bundleWeb', Copy) {
+    from '../../static'
+    include 'index.html'
+    into layout.buildDirectory.dir('generated/assets')
+}
+tasks.named('preBuild').configure { dependsOn 'bundleWeb' }

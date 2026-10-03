@@ -34,6 +34,7 @@ public class MainActivity extends Activity {
     private Button retry;
     private final String server = "http://127.0.0.1:8557";
     private final String alias = "podcast-api-keys";
+    private NativeBackend backend;
 
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
@@ -62,7 +63,7 @@ public class MainActivity extends Activity {
                 return !request.getUrl().toString().startsWith(server + "/");
             }
             @Override public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
-                if (request.isForMainFrame()) showError("未连接到电脑服务。请保持 USB 连接并启动电脑上的播客服务。");
+                if (request.isForMainFrame()) showError("本机服务尚未就绪，请点击重新连接。");
             }
             @Override public void onPageFinished(WebView view, String url) {
                 if (url.startsWith(server + "/")) {
@@ -101,10 +102,7 @@ public class MainActivity extends Activity {
         if (file.exists()) {
             byte[] plain = read(new FileInputStream(file));
             new JSONObject(new String(plain,StandardCharsets.UTF_8));
-            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding"); cipher.init(Cipher.ENCRYPT_MODE,key());
-            String encrypted = Base64.encodeToString(cipher.doFinal(plain),Base64.NO_WRAP);
-            if (!preferences.edit().putString("keys",encrypted).putString("iv",Base64.encodeToString(cipher.getIV(),Base64.NO_WRAP)).commit())
-                throw new Exception("Cannot save credentials");
+            saveCredentials(new JSONObject(new String(plain,StandardCharsets.UTF_8)));
             java.util.Arrays.fill(plain,(byte)0);
             if (!file.delete()) throw new Exception("Cannot remove provision file");
         }
@@ -114,24 +112,26 @@ public class MainActivity extends Activity {
         return new String(cipher.doFinal(Base64.decode(preferences.getString("keys",""),Base64.NO_WRAP)),StandardCharsets.UTF_8);
     }
 
+    private synchronized void saveCredentials(JSONObject credentials) throws Exception {
+        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding"); cipher.init(Cipher.ENCRYPT_MODE,key());
+        String encrypted = Base64.encodeToString(cipher.doFinal(credentials.toString().getBytes(StandardCharsets.UTF_8)),Base64.NO_WRAP);
+        if (!getSharedPreferences("private_keys",MODE_PRIVATE).edit().putString("keys",encrypted)
+            .putString("iv",Base64.encodeToString(cipher.getIV(),Base64.NO_WRAP)).commit()) throw new Exception("Cannot save credentials");
+    }
+
     private void connect() {
         status.setVisibility(View.VISIBLE); status.setText("正在连接播客服务…"); retry.setVisibility(View.GONE);
         new Thread(() -> {
-            HttpURLConnection connection = null;
             try {
                 String credentials = provision();
-                connection = (HttpURLConnection)new URL(server + "/api/settings").openConnection();
-                connection.setConnectTimeout(7000); connection.setReadTimeout(7000);
-                if (credentials != null) {
-                    connection.setRequestMethod("POST"); connection.setRequestProperty("Content-Type","application/json"); connection.setDoOutput(true);
-                    try (java.io.OutputStream output = connection.getOutputStream()) { output.write(credentials.getBytes(StandardCharsets.UTF_8)); }
+                if (backend == null) {
+                    backend = new NativeBackend(getApplicationContext(),credentials == null ? new JSONObject() : new JSONObject(credentials),this::saveCredentials);
+                    backend.start();
                 }
-                if (connection.getResponseCode() != 200) throw new Exception("Connection failed");
-                read(connection.getInputStream());
                 runOnUiThread(() -> web.loadUrl(server + "/"));
             } catch (Exception e) {
-                runOnUiThread(() -> showError("未连接到电脑服务。请保持 USB 连接，启动电脑服务后点击重新连接。"));
-            } finally { if (connection != null) connection.disconnect(); }
+                runOnUiThread(() -> showError("本机服务启动失败，请重新打开应用。"));
+            }
         }).start();
     }
 
@@ -139,5 +139,5 @@ public class MainActivity extends Activity {
     @Override public void onBackPressed() {
         web.evaluateJavascript("(function(){var d=document.getElementById('settingsDialog');if(d&&d.open){closeSettings();return;}if(document.getElementById('colLeft').classList.contains('collapsed')){expandSidebar();}})()",null);
     }
-    @Override protected void onDestroy() { web.destroy(); super.onDestroy(); }
+    @Override protected void onDestroy() { web.destroy(); if (backend != null) backend.close(); super.onDestroy(); }
 }

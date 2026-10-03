@@ -286,7 +286,7 @@ def define_word(word: str = Query(..., min_length=1), context: str = ""):
 
     try:
         response = gemini_client.models.generate_content(
-            model=os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite"),
+            model=os.environ.get("GEMINI_MODEL", "gemini-3.5-flash"),
             contents=prompt,
             config={"response_mime_type": "application/json"},
         )
@@ -373,7 +373,7 @@ async def ask_podcast_ai(request: Request):
 回答使用流畅自然的中文，可适当使用 Markdown 格式（粗体、列表、引用等），便于排版阅读。"""
 
     try:
-        model_name = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
+        model_name = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
         response = await gemini_client.aio.models.generate_content(
             model=model_name,
             contents=prompt,

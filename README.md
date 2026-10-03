@@ -70,6 +70,8 @@ node --test tests/player.test.cjs
 
 可选真实浏览器播放检查（需要 Playwright 和 Microsoft Edge）：
 
+Android 手机和平板独立版的构建、安装及设备端处理流程见 [android/README.md](android/README.md)，运行时无需电脑后台或 USB 连接。
+
 ```powershell
 python -m pip install playwright
 python tests/browser_smoke.py
