@@ -738,6 +738,7 @@ function startPlay(url, title, author, cover, transcriptUrl, description) {
     clearLoop();
 
     audio.pause();
+    audio.preload = 'none';
     audio.src = url;
     audio.playbackRate = speed;
     
@@ -941,6 +942,8 @@ function triggerAiTranscribe(auto = false) {
                 setBadge(data.status === 'official' ? '✅ Official Transcript' : '✅ Groq Subtitles Ready', 'rgba(168,85,247,.15)', '#c084fc', 'rgba(168,85,247,.3)');
                 finish();
                 playWhenReady();
+            } else if (data.status === 'audio_source') {
+                if (data.audio_url && audio.currentTime === 0 && audio.paused) audio.src = data.audio_url;
             } else if (data.status === 'audio_ready') {
                 // Select the downloaded audio only before playback; never reset a playing source.
                 if (data.local_audio && audio.currentTime === 0 && audio.paused) audio.src = data.local_audio;

@@ -1,10 +1,12 @@
 import json
 import os
 import shutil
+import subprocess
 import tempfile
 import threading
 import unittest
 import wave
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -143,6 +145,106 @@ class TranscriptionTests(unittest.TestCase):
         self.assertEqual(events[-1]["status"], "done")
         self.assertEqual([e["until"] for e in events if e["status"] == "chunk_ready"][-1], 921)
         self.assertTrue(vtt.exists())
+
+    @unittest.skipUnless(shutil.which("ffmpeg"), "FFmpeg not installed")
+    def test_first_subtitles_before_remaining_audio_is_downloaded(self):
+        source = self.cache / "source.wav"
+        with wave.open(str(source), "wb") as wav:
+            wav.setparams((1, 2, 16000, 0, "NONE", "not compressed"))
+            wav.writeframes(b"\0\0" * (16000 * 80))
+        contents = source.read_bytes()
+        self.assert_first_subtitles_stream_before_tail(contents, 44 + 32000 * 40)
+
+    @unittest.skipUnless(shutil.which("ffmpeg"), "FFmpeg not installed")
+    def test_mp3_first_subtitles_before_remaining_audio_is_downloaded(self):
+        source = self.cache / "source.mp3"
+        subprocess.run(["ffmpeg", "-nostdin", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=80",
+                        "-ar", "16000", "-ac", "1", str(source)], check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        contents = source.read_bytes()
+        self.assert_first_subtitles_stream_before_tail(contents, len(contents) // 2)
+
+    def assert_first_subtitles_stream_before_tail(self, contents, prefix):
+        release_tail = threading.Event()
+        sent_tail = threading.Event()
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(contents)))
+                self.end_headers()
+                try:
+                    self.wfile.write(contents[:prefix])
+                    self.wfile.flush()
+                    if release_tail.wait(8):
+                        self.wfile.write(contents[prefix:])
+                        self.wfile.flush()
+                        sent_tail.set()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        remote_url = f"http://127.0.0.1:{server.server_port}/audio.wav"
+        _, audio, vtt = stt.cache_paths(self.cache, remote_url)
+        groq_started_before_tail = []
+
+        def transcribe(chunk, *args):
+            groq_started_before_tail.append(not sent_tail.is_set())
+            with wave.open(str(chunk), "rb") as wav:
+                duration = wav.getnframes() / wav.getframerate()
+            return [{"start": 0, "end": duration, "text": "Streaming test"}]
+
+        try:
+            with patch.dict(os.environ, {"GROQ_API_KEY": "test-key"}), patch.object(stt, "groq_segments", side_effect=transcribe):
+                iterator = stt.transcript_events(remote_url, "", False, self.cache)
+                events = []
+                for event in iterator:
+                    events.append(event)
+                    if event["status"] == "chunk_ready":
+                        self.assertEqual(event["until"], 30)
+                        self.assertFalse(sent_tail.is_set(), "first chunk waited for the full download")
+                        self.assertFalse(audio.exists())
+                        break
+                else:
+                    self.fail(f"No first chunk: {events}")
+                release_tail.set()
+                events.extend(iterator)
+            self.assertTrue(groq_started_before_tail[0])
+            coverage = [e["until"] for e in events if e["status"] == "chunk_ready"]
+            self.assertEqual(coverage[:2], [30, 60])
+            self.assertAlmostEqual(coverage[-1], 80, delta=0.1)
+            self.assertEqual(events[-1]["status"], "done")
+            self.assertEqual(audio.read_bytes(), contents)
+            self.assertTrue(vtt.exists())
+        finally:
+            release_tail.set()
+            server.shutdown()
+            server.server_close()
+
+    def test_audio_proxy_streams_and_forwards_range(self):
+        response = Mock(status_code=206, headers={"Content-Type": "audio/mpeg", "Content-Range": "bytes 10-12/50", "Accept-Ranges": "bytes"})
+        response.iter_content.return_value = iter([b"abc"])
+        with patch.object(app, "CACHE_DIR", str(self.cache)), patch.object(app.requests, "get", return_value=response) as get:
+            result = TestClient(app.app).get("/api/audio", params={"url": self.url}, headers={"Range": "bytes=10-12"})
+        self.assertEqual(result.status_code, 206)
+        self.assertEqual(result.content, b"abc")
+        self.assertEqual(result.headers["content-range"], "bytes 10-12/50")
+        self.assertEqual(get.call_args.kwargs["headers"]["Range"], "bytes=10-12")
+        response.close.assert_called()
+
+    def test_audio_proxy_uses_complete_cache_for_range_requests(self):
+        _, audio, _ = stt.cache_paths(self.cache, self.url)
+        audio.write_bytes(b"0123456789")
+        with patch.object(app, "CACHE_DIR", str(self.cache)), patch.object(app.requests, "get") as get:
+            result = TestClient(app.app).get("/api/audio", params={"url": self.url}, headers={"Range": "bytes=2-4"})
+        self.assertEqual(result.status_code, 206)
+        self.assertEqual(result.content, b"234")
+        get.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -90,6 +90,20 @@ test('error before subtitles never starts audio and is retryable', () => {
     assert.equal(p.streams.length, 2);
 });
 
+test('streaming source is selected before subtitles; completing the cache never resets playback', () => {
+    const p = player(); p.start(); const stream = p.streams[0];
+    stream.emit({status: 'audio_source', audio_url: '/api/audio?url=episode'});
+    assert.equal(p.audio.src, '/api/audio?url=episode');
+    assert.equal(p.audio.playCount, 0);
+    assert.equal(p.audio.preload, 'none');
+    stream.emit(cue(0, 20)); stream.emit({status: 'chunk_ready', until: 30});
+    p.audio.currentTime = 5;
+    stream.emit({status: 'audio_ready', local_audio: '/cache/complete.mp3'});
+    assert.equal(p.audio.src, '/api/audio?url=episode');
+    assert.equal(p.audio.currentTime, 5);
+    assert.equal(p.audio.paused, false);
+});
+
 test('word apostrophes are escaped and VTT cue settings are parsed', () => {
     const p = player();
     assert.match(p.run(`wordSpans("don't", 2)`), /don\\'t/);

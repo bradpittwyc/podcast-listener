@@ -4,14 +4,15 @@ import json
 import urllib.parse
 import xml.etree.ElementTree as ET
 import requests
-from fastapi import FastAPI, Query, HTTPException
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi import FastAPI, Query, HTTPException, Request
+from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse
+from starlette.background import BackgroundTask
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from google import genai as genai_sdk
 from dotenv import load_dotenv
-from transcription import transcript_events, stream_with_heartbeat, to_vtt
+from transcription import transcript_events, stream_with_heartbeat, to_vtt, cache_paths
 
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
@@ -143,6 +144,38 @@ def get_local_proxy():
     # Use an explicitly configured HTTP proxy; never guess the protocol of open ports.
     proxy = os.environ.get("PODCAST_PROXY", "").strip()
     return {"http": proxy, "https": proxy} if proxy else None
+
+
+@app.get("/api/audio")
+def stream_audio(url: str, request: Request):
+    # Use one stable playback URL while transcription downloads in the background.
+    # Once the full cache is available, subsequent range requests use that file.
+    _, audio_path, _ = cache_paths(CACHE_DIR, url)
+    if audio_path.exists() and audio_path.stat().st_size:
+        return FileResponse(audio_path, media_type="audio/mpeg")
+    headers = {"User-Agent": "Mozilla/5.0", "Accept-Encoding": "identity"}
+    if request.headers.get("range"):
+        headers["Range"] = request.headers["range"]
+    try:
+        upstream = requests.get(url, headers=headers, stream=True, timeout=(10, 15), proxies=get_local_proxy())
+        if upstream.status_code not in (200, 206):
+            status = upstream.status_code
+            upstream.close()
+            raise HTTPException(status_code=status, detail="音频源暂时不可用。")
+    except requests.RequestException:
+        raise HTTPException(status_code=502, detail="无法连接音频源，请检查网络。")
+
+    def audio_bytes():
+        try:
+            yield from upstream.iter_content(chunk_size=16 * 1024)
+        finally:
+            upstream.close()
+    forwarded = {name: upstream.headers[name] for name in ("Content-Range", "Accept-Ranges") if name in upstream.headers}
+    if "Content-Length" in upstream.headers and upstream.headers.get("Content-Encoding", "identity") == "identity":
+        forwarded["Content-Length"] = upstream.headers["Content-Length"]
+    return StreamingResponse(audio_bytes(), status_code=upstream.status_code,
+                             media_type=upstream.headers.get("Content-Type", "audio/mpeg"),
+                             headers=forwarded, background=BackgroundTask(upstream.close))
 
 
 @app.get("/api/transcribe")

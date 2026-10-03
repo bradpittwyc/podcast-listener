@@ -84,7 +84,7 @@ def main():
                 page.route("https://via.placeholder.com/**", lambda route: route.abort())
                 page.goto(f"http://127.0.0.1:{server.server_port}")
                 page.evaluate("startPlay('/cache/one.mp3', 'Test', 'Show', '', '', '')")
-                page.wait_for_function("subtitleStream && audio.readyState >= 1")
+                page.wait_for_function("subtitleStream !== null")
                 assert page.evaluate("audio.paused && cues.length === 0")
                 while not streams:
                     page.wait_for_timeout(20)
