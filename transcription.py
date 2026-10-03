@@ -297,9 +297,11 @@ def transcript_events(audio_url, transcript_url, force_refresh, cache_dir, proxi
                 yield {"status": "cached", "vtt": content, "local_audio": f"/cache/{key}.mp3"}
                 return
 
-        api_key = os.environ.get("GROQ_API_KEY", "").strip()
-        if not api_key:
+        api_key_env = os.environ.get("GROQ_API_KEY", "").strip()
+        if not api_key_env:
             raise RuntimeError("未配置 GROQ_API_KEY；请配置密钥后刷新字幕，字幕就绪后播放。")
+        api_keys = [k.strip() for k in api_key_env.split(",") if k.strip()]
+        
         if not shutil.which("ffmpeg"):
             raise RuntimeError("找不到 FFmpeg；请安装并加入 PATH 后重启服务。")
 
@@ -314,7 +316,7 @@ def transcript_events(audio_url, transcript_url, force_refresh, cache_dir, proxi
                 chunks = local_audio_chunks(audio_path, work_dir, stopped)
             cues = []
             try:
-                for item in chunks:
+                for i, item in enumerate(chunks):
                     if stopped.is_set():
                         return
                     if item["status"] == "audio_ready":
@@ -325,8 +327,12 @@ def transcript_events(audio_url, transcript_url, force_refresh, cache_dir, proxi
                         continue
                     chunk, offset, duration = item["path"], item["offset"], item["duration"]
                     yield {"status": "progress", "detail": f"Groq 正在转写 {offset / 60:.1f}–{(offset + duration) / 60:.1f} 分钟"}
+                    
+                    # 轮询使用 API Key
+                    current_key = api_keys[i % len(api_keys)]
+                    
                     try:
-                        segments = groq_segments(chunk, api_key, proxies, stopped)
+                        segments = groq_segments(chunk, current_key, proxies, stopped)
                     finally:
                         chunk.unlink(missing_ok=True)
                     if segments is None or stopped.is_set():
