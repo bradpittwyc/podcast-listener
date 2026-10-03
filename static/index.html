@@ -293,117 +293,81 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
 .nb-meta { font-size: 9px; color: var(--text3); margin-top: 4px; display: flex; gap: 5px; align-items: center; }
 .nb-del { margin-left: auto; background: none; border: none; color: var(--text3); cursor: pointer; font-size: 10px; }
 
-/* ═══════════════════════════════ LEFT BOTTOM: PLAYER CONSOLE ═══════════════════════════════ */
-.left-player-console {
+/* ═══════════════════════════════ MIDDLE BOTTOM: PLAYER CONSOLE ═══════════════════════════════ */
+.mid-player-console {
     background: rgba(10,10,18,0.98);
     border-top: 1px solid rgba(255,255,255,0.1);
-    padding: 12px 14px 14px;
+    padding: 12px 20px 16px;
     display: flex;
     flex-direction: column;
-    gap: 9px;
+    gap: 12px;
     flex-shrink: 0;
     box-shadow: 0 -4px 20px rgba(0,0,0,0.3);
 }
 
-.lp-info-row {
+.mp-prog-row {
     display: flex;
     align-items: center;
-    gap: 9px;
-    min-width: 0;
-}
-.pb-cover {
-    width: 36px;
-    height: 36px;
-    border-radius: 6px;
-    object-fit: cover;
-    flex-shrink: 0;
-    background: rgba(255,255,255,0.05);
-}
-.pb-info {
-    flex: 1;
-    min-width: 0;
-}
-.pb-title {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text);
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-}
-.pb-author {
-    font-size: 10px;
-    color: var(--text3);
-    margin-top: 1px;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-}
-
-/* Progress bar in left player */
-.lp-prog-wrap {
-    display: flex;
-    align-items: center;
-    gap: 8px;
+    gap: 12px;
 }
 .pb-time {
-    font-size: 10.5px;
+    font-size: 11px;
     color: var(--text3);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
 }
 .prog-bar {
     flex: 1;
-    height: 4px;
+    height: 5px;
     background: rgba(255,255,255,0.1);
-    border-radius: 2px;
+    border-radius: 3px;
     cursor: pointer;
     position: relative;
     transition: height .15s;
 }
-.prog-bar:hover { height: 6px; }
+.prog-bar:hover { height: 7px; }
 .prog-fill {
     height: 100%;
     background: var(--grad);
-    border-radius: 2px;
+    border-radius: 3px;
     pointer-events: none;
 }
 
-/* Controls + Volume row */
-.lp-ctrl-row {
+.mp-ctrl-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
+    gap: 16px;
 }
-.lp-buttons {
+
+.mp-left {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 12px;
 }
 .cbtn {
-    width: 28px;
-    height: 28px;
+    width: 32px;
+    height: 32px;
     background: none;
     border: none;
-    border-radius: 6px;
+    border-radius: 8px;
     color: var(--text2);
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 12px;
+    font-size: 14px;
     transition: all .15s;
 }
 .cbtn:hover { background: var(--card-hover); color: var(--text); }
 .cbtn.play {
-    width: 34px;
-    height: 34px;
+    width: 40px;
+    height: 40px;
     background: var(--grad);
     color: #fff;
     border-radius: 50%;
-    font-size: 13px;
-    box-shadow: 0 3px 10px rgba(168,85,247,0.35);
+    font-size: 15px;
+    box-shadow: 0 3px 12px rgba(168,85,247,0.35);
 }
 .cbtn.play:hover { transform: scale(1.06); }
 
@@ -411,21 +375,22 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
 .vol-ctrl-wrap {
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: 6px;
     background: rgba(255,255,255,0.03);
     border: 1px solid var(--border);
     border-radius: 8px;
-    padding: 3px 8px;
+    padding: 4px 10px;
+    margin-left: 8px;
 }
 .vol-btn {
     background: none;
     border: none;
     color: var(--text2);
     cursor: pointer;
-    font-size: 12px;
+    font-size: 13px;
     padding: 0;
-    width: 20px;
-    height: 20px;
+    width: 22px;
+    height: 22px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -434,7 +399,7 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
 .vol-slider {
     -webkit-appearance: none;
     appearance: none;
-    width: 58px;
+    width: 64px;
     height: 4px;
     background: rgba(255,255,255,0.12);
     border-radius: 2px;
@@ -444,40 +409,28 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
 .vol-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
-    width: 10px;
-    height: 10px;
+    width: 12px;
+    height: 12px;
     border-radius: 50%;
     background: var(--purple-light);
     cursor: pointer;
 }
 
-/* Speed Slider (0.25x - 1.0x) */
-.lp-speed-wrap {
-    background: rgba(255,255,255,0.02);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 6px 10px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-.speed-hd-row {
+/* Speed Slider */
+.mp-speed-wrap {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    font-size: 10.5px;
-    color: var(--text3);
-    font-weight: 600;
+    gap: 8px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 4px 12px;
 }
-.speed-val-tag {
-    color: var(--purple-light);
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-}
+.speed-lbl { font-size: 10.5px; color: var(--text3); font-weight: 600; white-space: nowrap; }
 .speed-slider {
     -webkit-appearance: none;
     appearance: none;
-    width: 100%;
+    width: 80px;
     height: 4px;
     background: rgba(255,255,255,0.12);
     border-radius: 2px;
@@ -494,29 +447,24 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
     box-shadow: 0 1px 4px rgba(0,0,0,0.5);
     cursor: pointer;
 }
-.speed-ticks {
-    display: flex;
-    justify-content: space-between;
-    font-size: 9px;
-    color: var(--text3);
-    font-weight: 500;
-    padding: 0 1px;
-}
 
 /* A-B Loop Row */
+.mp-right {
+    display: flex;
+    align-items: center;
+}
 .lp-loop-row {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 6px;
 }
 .lb {
-    flex: 1;
-    padding: 4px 6px;
+    padding: 6px 10px;
     background: var(--card-bg);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: 8px;
     color: var(--text2);
-    font-size: 10.5px;
+    font-size: 11px;
     font-weight: 600;
     cursor: pointer;
     transition: all .15s;
@@ -524,12 +472,12 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 3px;
+    gap: 4px;
 }
 .lb:hover { background: var(--card-hover); color: var(--text); }
 .lb.active { background: rgba(168,85,247,.18); border-color: rgba(168,85,247,.45); color: #c084fc; }
 .lb.loop-on { background: rgba(16,185,129,.15); border-color: rgba(16,185,129,.4); color: var(--green); }
-.lb.danger { flex: 0 0 24px; padding: 4px 0; color: #f87171; border-color: rgba(248,113,113,0.2); }
+.lb.danger { padding: 6px 8px; color: #f87171; border-color: rgba(248,113,113,0.2); }
 .lb.danger:hover { background: rgba(248,113,113,0.1); }
 
 /* Compatibility element for unit test queries */
@@ -1045,83 +993,6 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
         </div>
     </div>
 
-    <!-- Left Bottom: Player Console -->
-    <div class="left-player-console" id="leftPlayerConsole">
-        <!-- Episode info -->
-        <div class="lp-info-row" id="playerBar">
-            <img class="pb-cover" id="pbCover" src="https://via.placeholder.com/60" alt="">
-            <div class="pb-info">
-                <div class="pb-title" id="pbTitle">未选择播放播客</div>
-                <div class="pb-author" id="pbAuthor">请在上方选择节目</div>
-            </div>
-            <button class="icon-btn lp-collapse-btn" onclick="toggleSidebar()" title="收起/展开播客列表">
-                <i class="fa-solid fa-angles-left" id="sidebarToggleIcon"></i>
-            </button>
-        </div>
-
-        <!-- Progress bar -->
-        <div class="lp-prog-wrap">
-            <span class="pb-time" id="pbCur">0:00</span>
-            <div class="prog-bar" id="progBar" onclick="seekAudio(event)">
-                <div class="prog-fill" id="progFill" style="width:0%"></div>
-            </div>
-            <span class="pb-time" id="pbTot">0:00</span>
-        </div>
-
-        <!-- Playback + Volume Controls -->
-        <div class="lp-ctrl-row">
-            <div class="lp-buttons">
-                <button class="cbtn" onclick="skipAudio(-10)" title="-10秒"><i class="fa-solid fa-rotate-left"></i></button>
-                <button class="cbtn play" id="playBtn" onclick="togglePlay()"><i class="fa-solid fa-play"></i></button>
-                <button class="cbtn" onclick="skipAudio(30)" title="+30秒"><i class="fa-solid fa-rotate-right"></i></button>
-            </div>
-            <!-- Volume Slider -->
-            <div class="vol-ctrl-wrap">
-                <button class="vol-btn" id="volBtn" onclick="toggleMute()" title="音量/静音">
-                    <i class="fa-solid fa-volume-high" id="volIcon"></i>
-                </button>
-                <input type="range" class="vol-slider" id="volSlider" min="0" max="1" step="0.05" value="1" oninput="setVolume(this.value)" title="调节音量">
-            </div>
-        </div>
-
-        <!-- Speed Slider: 0.25x to 1.0x (No Speedup) -->
-        <div class="lp-speed-wrap">
-            <div class="speed-hd-row">
-                <span><i class="fa-solid fa-gauge-high"></i> 播放速度</span>
-                <span id="speedVal" class="speed-val-tag">1.00×</span>
-            </div>
-            <input type="range" class="speed-slider" id="speedSlider" min="0.25" max="1.0" step="0.05" value="1.0" oninput="onSpeedSlider(this.value)">
-            <div class="speed-ticks">
-                <span>0.25× (慢速)</span>
-                <span>0.5×</span>
-                <span>0.75×</span>
-                <span>1.0× (原速)</span>
-            </div>
-        </div>
-
-        <!-- A-B Loop Controls -->
-        <div class="lp-loop-row" id="lc">
-            <button class="lb" id="btnA" onclick="setLoopA()">
-                <i class="fa-solid fa-flag" style="color:var(--green)"></i> A: <span id="lblA">--</span>
-            </button>
-            <button class="lb" id="btnB" onclick="setLoopB()">
-                <i class="fa-solid fa-flag-checkered" style="color:var(--pink)"></i> B: <span id="lblB">--</span>
-            </button>
-            <button class="lb" id="btnLoop" onclick="toggleLoop()">
-                <i class="fa-solid fa-repeat"></i> Loop
-            </button>
-            <button class="lb danger" onclick="clearLoop()" title="清除 Loop">
-                <i class="fa-solid fa-xmark"></i>
-            </button>
-        </div>
-
-        <!-- Hidden elements for test compatibility -->
-        <div id="speedRow">
-            <button class="lb" onclick="setSpeed(0.6)">0.6×</button>
-            <button class="lb" onclick="setSpeed(0.75)">0.75×</button>
-            <button class="lb active" onclick="setSpeed(1.0)">1.0×</button>
-        </div>
-    </div>
 </aside>
 
 <!-- ═══════════════════════════════ COLUMN 2: MIDDLE (50vw) SUBTITLES ═══════════════════════════════ -->
@@ -1159,6 +1030,62 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
     <!-- Subtitle Scroll Area -->
     <div class="sub-scroll" id="subScroll" style="display:none"></div>
     <div id="subPanel" style="display:none"></div>
+
+    <!-- Middle Bottom: Flat Player Console -->
+    <div class="mid-player-console" id="leftPlayerConsole">
+        <!-- Progress Bar Row -->
+        <div class="mp-prog-row">
+            <span class="pb-time" id="pbCur">0:00</span>
+            <div class="prog-bar" id="progBar" onclick="seekAudio(event)">
+                <div class="prog-fill" id="progFill" style="width:0%"></div>
+            </div>
+            <span class="pb-time" id="pbTot">0:00</span>
+        </div>
+        
+        <!-- Controls Row -->
+        <div class="mp-ctrl-row">
+            <!-- Left: Playback, Volume, Speed -->
+            <div class="mp-left">
+                <button class="cbtn" onclick="skipAudio(-10)" title="-10秒"><i class="fa-solid fa-rotate-left"></i></button>
+                <button class="cbtn play" id="playBtn" onclick="togglePlay()"><i class="fa-solid fa-play"></i></button>
+                <button class="cbtn" onclick="skipAudio(30)" title="+30秒"><i class="fa-solid fa-rotate-right"></i></button>
+                
+                <div class="vol-ctrl-wrap">
+                    <button class="vol-btn" id="volBtn" onclick="toggleMute()" title="音量/静音">
+                        <i class="fa-solid fa-volume-high" id="volIcon"></i>
+                    </button>
+                    <input type="range" class="vol-slider" id="volSlider" min="0" max="1" step="0.05" value="1" oninput="setVolume(this.value)">
+                </div>
+
+                <div class="mp-speed-wrap">
+                    <span class="speed-lbl">0.25x</span>
+                    <input type="range" class="speed-slider" id="speedSlider" min="0.25" max="1.0" step="0.05" value="1.0" oninput="onSpeedSlider(this.value)">
+                    <span class="speed-lbl">原速</span>
+                </div>
+            </div>
+
+            <!-- Right: Loop Area -->
+            <div class="mp-right">
+                <div class="lp-loop-row" id="lc">
+                    <button class="lb" id="btnA" onclick="setLoopA()">A</button>
+                    <button class="lb" id="btnB" onclick="setLoopB()">B</button>
+                    <button class="lb" id="btnLoop" onclick="toggleLoop()"><i class="fa-solid fa-repeat"></i> Loop</button>
+                    <button class="lb danger" onclick="clearLoop()" title="清除 Loop"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Hidden elements for backward test compatibility -->
+        <div id="speedRow" style="display:none;">
+            <button class="lb" onclick="setSpeed(0.6)">0.6×</button>
+            <button class="lb" onclick="setSpeed(0.75)">0.75×</button>
+            <button class="lb active" onclick="setSpeed(1.0)">1.0×</button>
+            <span id="speedVal">1.0</span>
+            <span id="lblA"></span><span id="lblB"></span>
+            <img class="pb-cover" id="pbCover" src="" alt="">
+            <div id="pbTitle"></div><div id="pbAuthor"></div>
+        </div>
+    </div>
 </main>
 
 <!-- ═══════════════════════════════ COLUMN 3: RIGHT (~25vw) AI Q&A COPILOT ═══════════════════════════════ -->
