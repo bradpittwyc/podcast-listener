@@ -29,7 +29,7 @@ public final class BackendService extends Service {
         Intent open=new Intent(this,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP|Intent.FLAG_ACTIVITY_CLEAR_TOP);
         PendingIntent content=PendingIntent.getActivity(this,0,open,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
         Notification.Builder builder=Build.VERSION.SDK_INT>=26?new Notification.Builder(this,channel):new Notification.Builder(this);
-        startForeground(8557,builder.setSmallIcon(com.podcastlearner.tablet.R.drawable.ic_headphones)
+        startForeground(8557,builder.setSmallIcon(com.podcastlearner.tablet.R.drawable.ic_brand_monochrome)
             .setContentTitle("播客学伴").setContentText("播放与字幕服务运行中，点击返回")
             .setContentIntent(content).setOngoing(true).setCategory(Notification.CATEGORY_SERVICE).build());
     }

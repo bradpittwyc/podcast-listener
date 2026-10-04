@@ -50,9 +50,8 @@ public class MainActivity extends Activity {
         splash.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,new int[]{0xff1b102c,0xff0d0d18,0xff09090f}));
         LinearLayout brand=new LinearLayout(this);
         brand.setOrientation(LinearLayout.VERTICAL);brand.setGravity(Gravity.CENTER);
-        ImageView icon=new ImageView(this);icon.setImageResource(R.drawable.ic_headphones);
-        GradientDrawable iconShape=new GradientDrawable();iconShape.setColor(0xff15101f);iconShape.setCornerRadius(dp(26));iconShape.setStroke(dp(1),0xff40234f);
-        icon.setBackground(iconShape);icon.setClipToOutline(true);icon.setElevation(dp(12));
+        ImageView icon=new ImageView(this);icon.setImageResource(R.drawable.brand_splash);
+        icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
         brand.addView(icon,new LinearLayout.LayoutParams(dp(96),dp(96)));
         TextView appName=new TextView(this){
             @Override protected void onSizeChanged(int w,int h,int oldw,int oldh){
