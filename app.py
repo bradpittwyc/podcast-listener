@@ -3,7 +3,12 @@ import re
 import json
 import tempfile
 import threading
+import math
+import shutil
+import aliyun
+import corrections
 import urllib.parse
+import urllib.request
 import xml.etree.ElementTree as ET
 import requests
 from fastapi import FastAPI, Query, HTTPException, Request
@@ -15,6 +20,9 @@ import uvicorn
 from google import genai as genai_sdk
 from dotenv import load_dotenv, set_key
 from transcription import transcript_events, stream_with_heartbeat, to_vtt, cache_paths
+from transcription_jobs import TranscriptionJobs
+
+transcription_jobs = TranscriptionJobs()
 
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
@@ -41,15 +49,32 @@ app.mount("/cache", StaticFiles(directory=CACHE_DIR), name="cache")
 
 SETTINGS_PATH = os.path.join(BASE_DIR, ".env")
 settings_lock = threading.Lock()
-KEY_FIELDS = {"groq_key_1": "GROQ_API_KEY_1", "groq_key_2": "GROQ_API_KEY_2", "gemini_key": "GEMINI_API_KEY"}
+corrections_lock = threading.Lock()
+KEY_FIELDS = {"gemini_key": "GEMINI_API_KEY",
+              "aliyun_key_1": "DASHSCOPE_API_KEY_1", "aliyun_key_2": "DASHSCOPE_API_KEY_2"}
+OPTION_FIELDS = {"subtitle_provider": ("AI_PROVIDER", ("aliyun",)),
+                 "dictionary_provider": ("DICTIONARY_PROVIDER", ("auto", "qwen", "gemini")),
+                 "aliyun_region": ("ALIYUN_REGION", ("beijing", "singapore"))}
+
+def provider_settings():
+    return {field: (os.environ.get(name) if os.environ.get(name) in values else values[0]) for field, (name, values) in OPTION_FIELDS.items()}
 
 def key_settings():
-    return {field: bool(os.environ.get(name, "") or (os.environ.get("GROQ_API_KEY", "") if field == "groq_key_1" else ""))
+    return {field: bool(os.environ.get(name, "") or (os.environ.get("DASHSCOPE_API_KEY", "") if field == "aliyun_key_1" else ""))
             for field, name in KEY_FIELDS.items()}
+
+def dictionary_proxy():
+    explicit = get_local_proxy()
+    proxies = explicit or urllib.request.getproxies()
+    return proxies.get('https') or proxies.get('all') or proxies.get('http')
+
+def dictionary_provider():
+    choice = provider_settings()['dictionary_provider']
+    return ('gemini' if dictionary_proxy() else 'qwen') if choice == 'auto' else choice
 
 @app.get("/api/settings")
 def get_settings():
-    return {"configured": key_settings()}
+    return {"configured": key_settings(), "options": provider_settings(), "dictionary_route": dictionary_provider()}
 
 @app.post("/api/settings")
 async def save_settings(request: Request):
@@ -63,10 +88,16 @@ async def save_settings(request: Request):
         body = await request.json()
     except ValueError:
         raise HTTPException(400, "设置格式错误")
-    if not isinstance(body, dict) or set(body) - set(KEY_FIELDS):
+    if not isinstance(body, dict) or set(body) - (set(KEY_FIELDS) | set(OPTION_FIELDS)):
         raise HTTPException(400, "设置格式错误")
     updates = {}
     for field, value in body.items():
+        if field in OPTION_FIELDS:
+            name, allowed = OPTION_FIELDS[field]
+            if value not in allowed:
+                raise HTTPException(400, "字幕服务或地域设置错误")
+            updates[name] = value
+            continue
         if not isinstance(value, str) or len(value) > 512 or any(c in value for c in "\r\n\x00"):
             raise HTTPException(400, "API Key 格式错误")
         if value.strip():
@@ -89,7 +120,7 @@ async def save_settings(request: Request):
         if new_client is not None:
             GEMINI_API_KEY = updates["GEMINI_API_KEY"]
             gemini_client = new_client
-    return {"configured": key_settings()}
+    return {"configured": key_settings(), "options": provider_settings()}
 
 def upgrade_to_hd_image(img_url: str) -> str:
     if not img_url:
@@ -248,16 +279,68 @@ def get_or_generate_transcript(audio_url: str, title: str = "", transcript_url: 
             cues.append(event["cue"])
         elif status == "error":
             return {"source": "error", "detail": event["detail"], "vtt": ""}
-    return {"source": "groq_api", "vtt": to_vtt(cues), "local_audio": local_audio}
+    return {"source": "aliyun_streaming", "vtt": to_vtt(cues), "local_audio": local_audio}
 
 
 @app.get("/api/transcribe_stream")
-def transcribe_stream(audio_url: str, title: str = "", transcript_url: str = "", force_refresh: bool = False):
+def transcribe_stream(audio_url: str, title: str = "", transcript_url: str = "", force_refresh: bool = False, request_id: str = ""):
+    try:
+        token = transcription_jobs.token(request_id)
+    except ValueError:
+        raise HTTPException(400, '无效的转写任务 ID。')
+    stopped = transcription_jobs.register(token)
     proxies = get_local_proxy()
-    def events(stopped):
-        return transcript_events(audio_url, transcript_url, force_refresh, CACHE_DIR, proxies, stopped)
-    return StreamingResponse(stream_with_heartbeat(events), media_type="text/event-stream",
+    def events(signal):
+        return transcript_events(audio_url, transcript_url, force_refresh, CACHE_DIR, proxies, signal)
+    def stream():
+        try:
+            yield from stream_with_heartbeat(events, stopped)
+        finally:
+            transcription_jobs.release(token, stopped)
+    return StreamingResponse(stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.post('/api/cancel_transcription')
+def cancel_transcription(body: dict):
+    try:
+        token = transcription_jobs.token(body.get('request_id'))
+    except ValueError:
+        raise HTTPException(400, '无效的转写任务 ID。')
+    transcription_jobs.cancel(token)
+    return {'status': 'cancelled'}
+
+
+@app.post('/api/retranscribe_sentence')
+def retranscribe_sentence(body: dict):
+    url, start, end = body.get('audio_url'), body.get('start'), body.get('end')
+    if (not isinstance(url, str) or urllib.parse.urlparse(url).scheme not in ('http', 'https')
+            or any(type(value) not in (float, int) or not math.isfinite(value) for value in (start, end))
+            or not 0 <= start < end or end - start > 300):
+        raise HTTPException(400, '单句音频范围无效，最长支持 5 分钟。')
+    if not shutil.which('ffmpeg'):
+        raise HTTPException(503, '找不到 FFmpeg。')
+    try:
+        token = transcription_jobs.token(body.get('request_id'))
+    except ValueError:
+        raise HTTPException(400, '无效的转写任务 ID。')
+    stopped = transcription_jobs.register(token)
+    try:
+        for previous in corrections.load(corrections.path_for(CACHE_DIR, url)):
+            if abs(previous['start'] - start) < .002 and abs(previous['end'] - end) < .002:
+                start, end = previous['source_start'], previous['source_end']
+                break
+        _, audio_path, _ = cache_paths(CACHE_DIR, url)
+        cue = aliyun.regenerate(url, audio_path, start, end, stopped=stopped)
+        if stopped.is_set():
+            raise HTTPException(409, '转写已取消。')
+        with corrections_lock:
+            corrections.save(corrections.path_for(CACHE_DIR, url), cue)
+        return {'status': 'success', 'cue': cue}
+    except RuntimeError as error:
+        raise HTTPException(502, str(error))
+    finally:
+        transcription_jobs.release(token, stopped)
 
 
 @app.api_route("/api/define", methods=["GET", "POST", "HEAD"])
@@ -281,10 +364,44 @@ def define_word(word: str = Query(..., min_length=1), context: str = ""):
         "context_note": "If context sentence was provided, brief note on how it is used in that specific context (in Chinese), otherwise empty string"
     }}
     """
+    if dictionary_provider() == 'qwen':
+        keys = aliyun.api_keys()
+        if not keys:
+            return {"status": "error", "message": "请在设置中填写阿里云百炼 Key。"}
+        try:
+            with requests.Session() as session:
+                session.trust_env = False
+                response = session.post(aliyun.root() + '/compatible-mode/v1/chat/completions',
+                    headers={'Authorization': 'Bearer ' + keys[0]},
+                    json={'model': 'qwen-flash', 'enable_thinking': False,
+                          'response_format': {'type': 'json_object'},
+                          'messages': [{'role': 'user', 'content': prompt}]}, timeout=(15, 60))
+                if not response.ok:
+                    return {'status': 'error', 'message': f'Qwen 查词返回 HTTP {response.status_code}，请检查密钥、权限或额度。'}
+                data = json.loads(response.json()['choices'][0]['message']['content'])
+                return {'status': 'success', 'provider': 'qwen', 'data': data}
+        except (requests.RequestException, ValueError, KeyError, IndexError):
+            return {'status': 'error', 'message': 'Qwen 查词失败，请检查阿里云连接后重试。'}
     if not gemini_client:
         return {"status": "error", "message": "GEMINI_API_KEY environment variable not configured"}
 
     try:
+        proxy = dictionary_proxy()
+        if proxy:
+            # The SDK ignores Windows system-proxy settings. Use the detected
+            # HTTP route explicitly, so choosing Gemini also uses that proxy.
+            with requests.Session() as session:
+                session.trust_env = False
+                response = session.post('https://generativelanguage.googleapis.com/v1beta/models/'
+                    + os.environ.get('GEMINI_MODEL', 'gemini-3.5-flash') + ':generateContent',
+                    proxies={'http': proxy, 'https': proxy}, headers={'x-goog-api-key': GEMINI_API_KEY},
+                    json={'contents': [{'parts': [{'text': prompt}]}],
+                          'generationConfig': {'responseMimeType': 'application/json'}}, timeout=(15, 60))
+                if not response.ok:
+                    return {'status': 'error', 'message': f'Gemini 查词返回 HTTP {response.status_code}，请检查代理或密钥。'}
+                parts = response.json()['candidates'][0]['content']['parts']
+                text = ''.join(part.get('text', '') for part in parts if not part.get('thought'))
+                return {'status': 'success', 'provider': 'gemini', 'data': json.loads(text)}
         response = gemini_client.models.generate_content(
             model=os.environ.get("GEMINI_MODEL", "gemini-3.5-flash"),
             contents=prompt,
@@ -334,7 +451,7 @@ async def ask_podcast_ai(request: Request):
         try:
             _, _, vtt_path = cache_paths(CACHE_DIR, audio_url)
             if vtt_path.exists():
-                vtt_content = vtt_path.read_text(encoding="utf-8")
+                vtt_content = corrections.apply_vtt(vtt_path.read_text(encoding="utf-8"), corrections.load(corrections.path_for(CACHE_DIR, audio_url)))
                 lines = []
                 for line in vtt_content.splitlines():
                     line = line.strip()

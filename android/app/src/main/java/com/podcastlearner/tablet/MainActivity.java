@@ -2,9 +2,6 @@ package com.podcastlearner.tablet;
 
 import android.app.Activity;
 import android.os.Bundle;
-import android.security.keystore.KeyGenParameterSpec;
-import android.security.keystore.KeyProperties;
-import android.util.Base64;
 import android.view.View;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceError;
@@ -13,131 +10,152 @@ import android.webkit.WebViewClient;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.InputStream;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
+import android.widget.ProgressBar;
+import android.view.Gravity;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.nio.charset.StandardCharsets;
-import java.security.KeyStore;
-import javax.crypto.Cipher;
-import javax.crypto.KeyGenerator;
-import javax.crypto.SecretKey;
-import javax.crypto.spec.GCMParameterSpec;
-import org.json.JSONObject;
 
 public class MainActivity extends Activity {
     private WebView web;
-    private LinearLayout layout;
+    private FrameLayout layout;
+    private FrameLayout splash;
+    private ProgressBar loading;
+    private long splashStarted;
     private TextView status;
     private Button retry;
     private final String server = "http://127.0.0.1:8557";
-    private final String alias = "podcast-api-keys";
-    private NativeBackend backend;
+    private boolean pageLoaded, pageFailed;
+    private volatile boolean destroyed;
+    private final java.util.concurrent.atomic.AtomicBoolean sharing = new java.util.concurrent.atomic.AtomicBoolean();
+    private final java.util.concurrent.atomic.AtomicBoolean connecting = new java.util.concurrent.atomic.AtomicBoolean();
 
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
         getWindow().setStatusBarColor(0xff0d0d18);
         getWindow().setNavigationBarColor(0xff0d0d18);
-        layout = new LinearLayout(this);
-        layout.setOrientation(LinearLayout.VERTICAL);
-        layout.setBackgroundColor(0xff0d0d18);
+        layout = new FrameLayout(this);
+        layout.setBackgroundColor(0xff09090f);
+        splashStarted=android.os.SystemClock.uptimeMillis();
+        splash=new FrameLayout(this);
+        splash.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,new int[]{0xff1b102c,0xff0d0d18,0xff09090f}));
+        LinearLayout brand=new LinearLayout(this);
+        brand.setOrientation(LinearLayout.VERTICAL);brand.setGravity(Gravity.CENTER);
+        ImageView icon=new ImageView(this);icon.setImageResource(R.drawable.ic_podcast);
+        GradientDrawable iconShape=new GradientDrawable();iconShape.setColor(0xffa855f7);iconShape.setCornerRadius(dp(28));
+        icon.setBackground(iconShape);icon.setClipToOutline(true);icon.setElevation(dp(12));
+        brand.addView(icon,new LinearLayout.LayoutParams(dp(112),dp(112)));
+        TextView motto=new TextView(this);motto.setText("Live in the Language");
+        motto.setTextColor(0xfff1eafa);motto.setTextSize(22);motto.setTypeface(Typeface.create("sans-serif-light",Typeface.NORMAL));
+        motto.setLetterSpacing(.045f);motto.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams mottoParams=new LinearLayout.LayoutParams(-2,-2);mottoParams.topMargin=dp(28);
+        brand.addView(motto,mottoParams);
+        loading=new ProgressBar(this,null,android.R.attr.progressBarStyleSmall);
+        loading.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(0xffc084fc));
+        LinearLayout.LayoutParams loadingParams=new LinearLayout.LayoutParams(dp(20),dp(20));loadingParams.topMargin=dp(32);
+        brand.addView(loading,loadingParams);
         status = new TextView(this);
-        status.setTextColor(0xffc084fc);
-        status.setPadding(24,24,24,24);
-        layout.addView(status);
+        status.setTextColor(0xff94a3b8);status.setTextSize(13);status.setGravity(Gravity.CENTER);
+        status.setPadding(dp(24),dp(24),dp(24),dp(12));status.setVisibility(View.GONE);
+        brand.addView(status);
         retry = new Button(this);
-        retry.setText("重新连接");
-        retry.setOnClickListener(v -> connect());
-        layout.addView(retry);
+        retry.setText("重试");retry.setTextColor(0xffe9d5ff);retry.setTextSize(14);retry.setAllCaps(false);
+        GradientDrawable retryShape=new GradientDrawable();retryShape.setColor(0xff28173d);retryShape.setCornerRadius(dp(22));retryShape.setStroke(dp(1),0xff68418a);
+        retry.setBackground(retryShape);retry.setVisibility(View.GONE);
+        retry.setOnClickListener(v -> {status.setVisibility(View.GONE);retry.setVisibility(View.GONE);loading.setVisibility(View.VISIBLE);connect();});
+        brand.addView(retry,new LinearLayout.LayoutParams(dp(112),dp(44)));
+        FrameLayout.LayoutParams brandParams=new FrameLayout.LayoutParams(-1,-2,Gravity.CENTER);
+        brandParams.leftMargin=dp(24);brandParams.rightMargin=dp(24);splash.addView(brand,brandParams);
         web = new WebView(this);
+        WebView.setWebContentsDebuggingEnabled((getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE)!=0);
         web.setBackgroundColor(0xff09090f);
         web.getSettings().setJavaScriptEnabled(true);
         web.getSettings().setDomStorageEnabled(true);
         web.getSettings().setMediaPlaybackRequiresUserGesture(false);
         web.getSettings().setAllowFileAccess(false);
         web.getSettings().setAllowContentAccess(false);
+        web.addJavascriptInterface(new Object(){
+            @android.webkit.JavascriptInterface public void shareSubtitle(String title,String text) {
+                if(text==null || text.isEmpty() || text.length()>8*1024*1024 || !sharing.compareAndSet(false,true))return;
+                new Thread(()->{
+                    try {
+                        android.content.Intent intent=SubtitleSharing.prepare(MainActivity.this,title,text);
+                        runOnUiThread(()->{
+                            sharing.set(false);if(destroyed)return;
+                            try{startActivity(android.content.Intent.createChooser(intent,"分享字幕到"));}
+                            catch(Exception e){android.widget.Toast.makeText(MainActivity.this,"无法打开系统分享面板",android.widget.Toast.LENGTH_SHORT).show();}
+                        });
+                    } catch(Exception e) {
+                        sharing.set(false);
+                        runOnUiThread(()->{if(!destroyed)android.widget.Toast.makeText(MainActivity.this,"字幕文稿准备失败，请重试",android.widget.Toast.LENGTH_SHORT).show();});
+                    }
+                },"subtitle-share").start();
+            }
+        },"PodcastAndroid");
         web.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 return !request.getUrl().toString().startsWith(server + "/");
             }
             @Override public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
-                if (request.isForMainFrame()) showError("本机服务尚未就绪，请点击重新连接。");
+                if (request.isForMainFrame()) { pageFailed=true;pageLoaded=false; showError("启动暂未完成，请稍后重试。"); }
             }
             @Override public void onPageFinished(WebView view, String url) {
-                if (url.startsWith(server + "/")) {
+                if (!pageFailed && url.startsWith(server + "/")) {
+                    pageLoaded=true;
+                    web.evaluateJavascript("window.androidNativeRuntime=true;document.body.classList.add('android-runtime');restoreAndroidPlaybackState()",null);
                     status.setVisibility(View.GONE);
                     retry.setVisibility(View.GONE);
+                    long remaining=Math.max(0,900-(android.os.SystemClock.uptimeMillis()-splashStarted));
+                    splash.postDelayed(()->{if(!destroyed && pageLoaded && !pageFailed)splash.animate().alpha(0).setDuration(250).withEndAction(()->splash.setVisibility(View.GONE)).start();},remaining);
                 }
             }
         });
-        layout.addView(web, new LinearLayout.LayoutParams(-1,0,1));
+        layout.addView(web,new FrameLayout.LayoutParams(-1,-1));
+        layout.addView(splash,new FrameLayout.LayoutParams(-1,-1));
         setContentView(layout);
-        connect();
-    }
-
-    private byte[] read(InputStream input) throws Exception {
-        try (InputStream stream = input; ByteArrayOutputStream bytes = new ByteArrayOutputStream()) {
-            byte[] buffer = new byte[4096]; int count;
-            while ((count = stream.read(buffer)) != -1) bytes.write(buffer,0,count);
-            return bytes.toByteArray();
-        }
-    }
-
-    private SecretKey key() throws Exception {
-        KeyStore store = KeyStore.getInstance("AndroidKeyStore"); store.load(null);
-        if (!store.containsAlias(alias)) {
-            KeyGenerator generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES,"AndroidKeyStore");
-            generator.init(new KeyGenParameterSpec.Builder(alias,KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT)
-                .setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build());
-            generator.generateKey();
-        }
-        return (SecretKey) store.getKey(alias,null);
-    }
-
-    private String provision() throws Exception {
-        File file = new File(getFilesDir(),"provision.json");
-        android.content.SharedPreferences preferences = getSharedPreferences("private_keys",MODE_PRIVATE);
-        if (file.exists()) {
-            byte[] plain = read(new FileInputStream(file));
-            new JSONObject(new String(plain,StandardCharsets.UTF_8));
-            saveCredentials(new JSONObject(new String(plain,StandardCharsets.UTF_8)));
-            java.util.Arrays.fill(plain,(byte)0);
-            if (!file.delete()) throw new Exception("Cannot remove provision file");
-        }
-        if (!preferences.contains("keys")) return null;
-        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-        cipher.init(Cipher.DECRYPT_MODE,key(),new GCMParameterSpec(128,Base64.decode(preferences.getString("iv",""),Base64.NO_WRAP)));
-        return new String(cipher.doFinal(Base64.decode(preferences.getString("keys",""),Base64.NO_WRAP)),StandardCharsets.UTF_8);
-    }
-
-    private synchronized void saveCredentials(JSONObject credentials) throws Exception {
-        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding"); cipher.init(Cipher.ENCRYPT_MODE,key());
-        String encrypted = Base64.encodeToString(cipher.doFinal(credentials.toString().getBytes(StandardCharsets.UTF_8)),Base64.NO_WRAP);
-        if (!getSharedPreferences("private_keys",MODE_PRIVATE).edit().putString("keys",encrypted)
-            .putString("iv",Base64.encodeToString(cipher.getIV(),Base64.NO_WRAP)).commit()) throw new Exception("Cannot save credentials");
     }
 
     private void connect() {
-        status.setVisibility(View.VISIBLE); status.setText("正在连接播客服务…"); retry.setVisibility(View.GONE);
+        if (destroyed || !connecting.compareAndSet(false,true)) return;
+        try {
+            android.content.Intent intent = new android.content.Intent(this,BackendService.class);
+            if(android.os.Build.VERSION.SDK_INT>=26)startForegroundService(intent);else startService(intent);
+        } catch(Exception e) { connecting.set(false); showError("启动暂未完成，请稍后重试。"); return; }
         new Thread(() -> {
-            try {
-                String credentials = provision();
-                if (backend == null) {
-                    backend = new NativeBackend(getApplicationContext(),credentials == null ? new JSONObject() : new JSONObject(credentials),this::saveCredentials);
-                    backend.start();
-                }
-                runOnUiThread(() -> web.loadUrl(server + "/"));
-            } catch (Exception e) {
-                runOnUiThread(() -> showError("本机服务启动失败，请重新打开应用。"));
+            boolean ready=false;
+            for(int attempt=0;attempt<30&&!destroyed;attempt++){
+                HttpURLConnection connection=null;
+                try {
+                    connection=(HttpURLConnection)new URL(server+"/api/runtime").openConnection();
+                    connection.setConnectTimeout(500);connection.setReadTimeout(500);
+                    ready=connection.getResponseCode()==200;
+                    if(ready)break;
+                } catch(Exception ignored){}finally{if(connection!=null)connection.disconnect();}
+                try{Thread.sleep(250);}catch(InterruptedException e){break;}
             }
-        }).start();
+            final boolean available=ready;
+            runOnUiThread(() -> {
+                connecting.set(false);if(destroyed)return;
+                if(!available){showError("启动暂未完成，请稍后重试。");return;}
+                status.setVisibility(View.GONE);retry.setVisibility(View.GONE);
+                if(!pageLoaded){pageFailed=false;web.loadUrl(server+"/");}
+                else web.evaluateJavascript("resumeAndroidPlayback()",null);
+            });
+        },"backend-health").start();
     }
 
-    private void showError(String text) { status.setVisibility(View.VISIBLE); status.setText(text); retry.setVisibility(View.VISIBLE); }
+    @Override protected void onResume(){super.onResume();if(web!=null){web.onResume();connect();}}
+    @Override protected void onPause(){
+        if(web!=null){web.evaluateJavascript("saveAndroidPlaybackState()",null);web.onPause();}
+        super.onPause();
+    }
+    private int dp(float value){return Math.round(value*getResources().getDisplayMetrics().density);}
+    private void showError(String text) {splash.animate().cancel();splash.setAlpha(1);splash.setVisibility(View.VISIBLE);loading.setVisibility(View.GONE);status.setVisibility(View.VISIBLE);status.setText(text);retry.setVisibility(View.VISIBLE);}
     @Override public void onBackPressed() {
         web.evaluateJavascript("(function(){var d=document.getElementById('settingsDialog');if(d&&d.open){closeSettings();return;}if(document.getElementById('colLeft').classList.contains('collapsed')){expandSidebar();}})()",null);
     }
-    @Override protected void onDestroy() { web.destroy(); if (backend != null) backend.close(); super.onDestroy(); }
+    @Override protected void onDestroy() { destroyed=true; web.destroy(); super.onDestroy(); }
 }

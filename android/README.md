@@ -1,21 +1,39 @@
 # Android 独立版
 
-应用名：播客学伴。原生 Android WebView 外壳，适配平板横竖屏。保持与网页相同的三栏布局：播客、字幕、AI 助教同时可见，左侧播客列表可以手动收起。
+应用名：播客学伴。平板保持播客、字幕、AI 助教三栏，侧边栏可收起；手机竖屏为字幕和助教上下同屏，播客列表可展开。界面、字体和图标随 APK 打包。
 
-手机竖屏（宽度不超过 600 CSS 像素）使用上下同屏布局：上方字幕和播放器，下方 AI 助教。播客列表通过顶部按钮展开，选择单集后收起。Mate 30 Pro 安装示例：`python android/install.py 手机序列号`。
+RSS、音频解码、阿里云转写、Gemini 问答和缓存均在设备运行，无需电脑服务或 USB。设备需能访问播客来源、阿里云和 Gemini。
 
-下载、RSS 解析、音频解码、切片、Groq 转写、Gemini 问答和字幕缓存均在 Android 设备上运行。无需电脑服务或 USB 转发；设备需要能访问播客源、Groq 和 Gemini 的网络。界面和图标字体随 APK 打包。
+本机后台由独立的 `BackendService` 前台服务持有，通知栏显示运行状态。Activity 销毁不关闭后台；回到应用时检查服务，并恢复字幕连接。节目、播放位置、倍速、音量和播放意图保存在 WebView 本地存储；页面重建后恢复，手动暂停保持暂停。用户强行停止应用后，需要重新打开才能启动服务。
 
-Android MediaExtractor / MediaCodec 从远程音频流持续解码，转为 16 kHz 单声道 WAV 切片。前 5 分钟每片 30 秒，5–15 分钟每片 120 秒，之后每片 300 秒。两个 Groq Key 的独立工作线程交替处理切片，结果按音频顺序提交，首段字幕就绪后播放。设备私有目录原子保存已完成切片和字幕；断线重连从最后完成的切片继续，跳过已转写的音频。字幕完整缓存后直接复用。Gemini 问答要求完整字幕并包含全文。
+「智能字幕助学」提示卡片关闭后保存关闭状态，重新加载页面或打开应用时保持隐藏。
 
-当前 Gemini 模型为 `gemini-3.5-flash`。设备上存在 `127.0.0.1:7890` 本机 HTTP 代理时，云 API 请求使用该代理的 HTTPS CONNECT 隧道；TLS 证书仍正常验证。没有该端口时使用设备直接网络/VPN。全局代理模式并不保证当前出口能访问云服务，403 仍需检查代理出口或服务授权。音频源使用设备的正常媒体网络。
+Android 播放控制栏的 Loop 同排提供「分享字幕」，使用系统 Sharesheet 交给笔记、文字处理或大模型等支持 TXT 附件的接收应用，不再选择字幕格式。整集字幕生成完成后按钮才可用；只分享完整 TXT 文件，包含节目信息、时间戳和已修正单句，不传递字幕正文文本，避免接收应用输入框及 Binder 大小限制。FileProvider 只暴露字幕分享缓存，给选中的应用临时读取权限，无需额外存储权限；分享缓存七天后在下次分享时清理。
 
-使用 Android SDK 35、JDK 17 或 21、Gradle 8.14.3 构建：`gradle -p android assembleDebug`。在 `android/local.properties` 配置本机 `sdk.dir`。
+启动时显示圆角播客图标与「Live in the Language」，服务就绪后淡出进入播放器。启动异常也保留品牌画面，显示简短说明和「重试」按钮。
 
-运行 `python android/install.py` 安装，并将本地 `.env` 的 Groq 和 Gemini Key 注入应用私有目录。应用首次导入后使用 Android Keystore 的 AES-GCM 加密保存，删除临时明文文件。密钥不打入 APK，不放进网页存储。安装脚本不打印密钥，并移除旧版 USB 转发。
+切换节目或重连时通过任务 ID 明确取消旧转写，包括单句重新生成；立即关闭关联的云端连接和解码音频下载。取消请求先于任务启动到达也有效。音频结束后显示收尾状态，确认完成即关闭字幕流并停止自动重连；单段任务有独立的最长处理时限，不会因心跳无限延长。连续失败最多自动重试 5 次，每次播放累计最多重试 20 次，之后需手动继续。
 
-连接多台设备时，运行 `python android/install.py 设备序列号`，通过 `adb devices -l` 查看序列号。
+Web 保留 SRT、VTT 和 TXT 导出，同位置提供打印预览，自动收集节目标题、作者、简介、音频来源、整理时间、字幕状态和时间戳，按 A4 分页，可打印或保存 PDF。
 
-本地调试 APK 位于 `android/app/build/outputs/apk/debug/app-debug.apk`。应用设置中修改的密钥加密保存在当前设备，重启后继续有效。重新运行安装脚本会将电脑 `.env` 中的密钥重新预置到指定设备。
+设置里的「查词模型」默认自动路由：每次查词检测当前 VPN / 系统 HTTP 代理，开启时调用 Gemini，关闭时调用 Qwen；无需重启。也可手动固定 Qwen 或 Gemini。Qwen 使用 `qwen-flash` 非思考模式和 JSON 输出，复用两把阿里云 Key 并交替查词；选择保存在设备加密配置中。AI 助教仍使用 Gemini。北京地域的 ASR 和 Qwen 查词同时绑定底层网络的 DNS 与 Socket，不受全局代理路由影响（VPN 需允许绕过）。代理开启不代表 Gemini 一定可访问；连接或权限错误正常提示。
 
-电脑网页仍使用原 Python 后台；Android 使用自己的本机后台，两端字幕缓存独立。
+MediaExtractor / MediaCodec 持续解码为 16 kHz 单声道 PCM，每约 100 毫秒通过 OkHttp WebSocket 上传 `qwen-audio-3.0-asr-flash-streaming`。前 5 分钟每 30 秒一个任务，之后逐渐延长。两把 Key 交替，最多两个任务并行；词时间戳按句末标点合并，未完成句子及断点原子保存。断线从断点继续，不重新上传已完成范围。
+
+每句的旋转箭头可重新识别单句，解码到该句结束即停止，上传范围限该句及少量上下文。修正单独保存，后台和缓存不会覆盖它。失败保留原文。问答等待完整字幕，并携带修正后的全文。
+
+播客目录、RSS 和音频优先绑定设备底层 Wi-Fi / 移动网络，同时使用该网络的 DNS；直连失败时重试系统网络。音频解码通过本机音频接口使用相同的下载路径，无需关闭代理，也不等待整集下载。VPN 禁止绕过时，直连可能不可用。
+
+阿里云默认北京、直接连接；也支持匹配新加坡地域的密钥。Gemini 默认 `gemini-3.5-flash`；优先使用系统当前提供的 HTTP 代理地址，兼容 Clash 动态端口；没有系统 HTTP 代理时使用当前 VPN / 默认网络，不再通过端口探测误选未启用的代理配置。所有 HTTPS 连接正常验证 TLS。
+
+构建需要 Android SDK 35、JDK 17 或 21、Gradle 8.14.3。在 `android/local.properties` 配置 `sdk.dir`。
+
+```powershell
+gradle -p android assembleDebug testDebugUnitTest
+adb devices -l
+python android/install.py 设备序列号
+```
+
+安装脚本将电脑 `.env` 的两把阿里云 Key、地域和 Gemini Key 注入设备私有目录，不打印密钥。应用导入后用 Android Keystore AES-GCM 加密保存并删除临时明文；设置页也使用加密存储。脚本移除旧 USB 转发。
+
+APK：`android/app/build/outputs/apk/debug/app-debug.apk`。Web 和 Android 使用各自缓存；阿里云缓存与旧 Groq 缓存分开。

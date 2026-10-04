@@ -1,4 +1,4 @@
-"""Groq transcription with atomic caches and playback-independent SSE events."""
+"""Alibaba streaming transcription with atomic caches and cancellable SSE."""
 
 import hashlib
 import json
@@ -6,15 +6,14 @@ import math
 import os
 import queue
 import shutil
-import subprocess
 import tempfile
 import threading
 import time
-import wave
-from concurrent.futures import Future, TimeoutError as FutureTimeout
 from pathlib import Path
 
 import requests
+import aliyun
+import corrections
 
 _locks = [threading.Lock() for _ in range(32)]
 HEADERS = {"User-Agent": "Mozilla/5.0"}
@@ -33,13 +32,21 @@ def read_checkpoint(path):
         until, index, cues = data["until"], data["next_chunk"], data["cues"]
         if data.get("version") != 1 or not isinstance(until, (int, float)) or not math.isfinite(until) or until <= 0:
             return empty
-        if type(index) is not int or index < 1 or not isinstance(cues, list):
+        if type(index) is not int or index < 0 or not isinstance(cues, list):
             return empty
         for cue in cues:
             start, end = cue["start"], cue["end"]
             if not math.isfinite(start) or not math.isfinite(end) or not 0 <= start < end <= until + 0.001 or not isinstance(cue["text"], str):
                 return empty
-        return {"until": until, "next_chunk": index, "cues": cues}
+        result = {"until": until, "next_chunk": index, "cues": cues}
+        pending = data.get('pending_sentence')
+        if pending is not None:
+            if (not isinstance(pending, dict) or not isinstance(pending.get('text'), str)
+                    or not math.isfinite(pending['start']) or not math.isfinite(pending['end'])
+                    or not 0 <= pending['start'] < pending['end'] <= until + .001):
+                return empty
+            result['pending_sentence'] = pending
+        return result
     except (OSError, ValueError, KeyError, TypeError):
         return empty
 
@@ -54,7 +61,8 @@ def chunk_seconds(offset):
 
 def cache_paths(cache_dir, audio_url):
     key = hashlib.md5(audio_url.encode("utf-8")).hexdigest()
-    return key, Path(cache_dir) / f"{key}.mp3", Path(cache_dir) / f"{key}.vtt"
+    subtitle_key = key + '-aliyun-sentences-v2'
+    return key, Path(cache_dir) / f"{key}.mp3", Path(cache_dir) / f"{subtitle_key}.vtt"
 
 
 def to_vtt(cues):
@@ -110,339 +118,36 @@ def download_audio(audio_url, path, proxies, stopped, on_data=None):
             temporary.unlink(missing_ok=True)
 
 
-def local_audio_chunks(audio_path, work_dir, stopped, start_offset=0.0):
-    offset = start_offset
-    while not stopped.is_set():
-        length = chunk_seconds(offset)
-        chunk = Path(work_dir) / f"chunk-{round(offset * 16000)}.wav"
-        command = ["ffmpeg", "-nostdin", "-y", "-ss", f"{offset:.6f}", "-i", str(audio_path),
-                   "-t", str(length), "-map", "0:a:0", "-vn", "-ar", "16000", "-ac", "1",
-                   "-c:a", "pcm_s16le", str(chunk)]
-        result = subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-                                timeout=180, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        if result.returncode:
-            raise RuntimeError("FFmpeg 无法处理此音频，请检查文件格式或重新下载。")
-        with wave.open(str(chunk), "rb") as wav:
-            duration = wav.getnframes() / wav.getframerate()
-        if duration < 0.01:
-            return
-        yield {"status": "chunk", "path": chunk, "offset": offset, "duration": duration}
-        offset += duration
-        if duration < length - 0.001:
-            return
-
-
-def remote_audio_chunks(audio_url, audio_path, work_dir, proxies, stopped, start_offset=0.0):
-    """Tee one HTTP download to the original cache and a streaming PCM decoder.
-
-    Decode and download keep running while Groq processes an earlier WAV chunk.
-    Audio bytes are never exposed as a complete cache until the HTTP request finishes.
-    """
-    command = ["ffmpeg", "-nostdin", "-loglevel", "error", "-probesize", "65536", "-analyzeduration", "1000000", "-i", "pipe:0", "-map", "0:a:0",
-               "-vn", "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", "-f", "s16le", "pipe:1"]
-    process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                               stderr=subprocess.DEVNULL,
-                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    messages = queue.Queue()
-    cancel = threading.Event()
-    downloaded = threading.Event()
-    result = {}
-
-    class Cancelled:
-        def is_set(self):
-            return stopped.is_set() or cancel.is_set()
-
-    cancelled = Cancelled()
-
-    def feed(data):
-        if result.get("pipe_closed") or cancelled.is_set():
-            return
-        try:
-            process.stdin.write(data)
-            process.stdin.flush()
-        except (BrokenPipeError, OSError):
-            # Let the consumer detect decoder failure and cancel this download.
-            result["pipe_closed"] = True
-
-    def transfer():
-        try:
-            result["complete"] = download_audio(audio_url, audio_path, proxies, cancelled, feed)
-            if result["complete"]:
-                messages.put({"status": "audio_ready"})
-        except Exception:
-            result["download_error"] = True
-        finally:
-            try:
-                process.stdin.close()
-            except (BrokenPipeError, OSError):
-                pass
-            downloaded.set()
-
-    def decode():
-        try:
-            samples, index = round(start_offset * 16000), 0
-            # If there is no complete audio cache, re-fetch/decode the prefix but
-            # skip its PCM; previously completed chunks are never sent to Groq again.
-            remaining = samples * 2
-            while remaining and not cancelled.is_set():
-                part = process.stdout.read(min(64 * 1024, remaining))
-                if not part:
-                    raise RuntimeError("音频长度短于已保存的断点，请重新生成字幕。")
-                remaining -= len(part)
-            while not cancelled.is_set():
-                offset = samples / 16000
-                needed = round(chunk_seconds(offset) * 16000) * 2
-                data = bytearray()
-                while len(data) < needed and not cancelled.is_set():
-                    part = process.stdout.read(min(64 * 1024, needed - len(data)))
-                    if not part:
-                        break
-                    data.extend(part)
-                # PCM16 must contain complete samples.
-                del data[len(data) // 2 * 2:]
-                if not data or cancelled.is_set():
-                    break
-                if len(data) < needed:
-                    if process.wait(timeout=15):
-                        result["decode_error"] = True
-                        break
-                    # Only a successful HTTP EOF can produce the final short chunk.
-                    # A broken connection must not turn a truncated buffer into subtitles.
-                    while not downloaded.wait(0.2):
-                        if cancelled.is_set():
-                            return
-                    if not result.get("complete") or result.get("download_error"):
-                        break
-                chunk = Path(work_dir) / f"{index:05d}.wav"
-                with wave.open(str(chunk), "wb") as wav:
-                    wav.setparams((1, 2, 16000, 0, "NONE", "not compressed"))
-                    wav.writeframes(data)
-                duration = len(data) / 32000
-                samples += len(data) // 2
-                index += 1
-                messages.put({"status": "chunk", "path": chunk, "offset": offset, "duration": duration})
-                if len(data) < needed:
-                    break
-            result["decoded_chunks"] = index
-        except Exception:
-            result["decode_error"] = True
-        finally:
-            messages.put({"status": "decoder_finished"})
-
-    downloader = threading.Thread(target=transfer, daemon=True)
-    decoder = threading.Thread(target=decode, daemon=True)
-    decoder.start()
-    downloader.start()
-    try:
-        while not cancelled.is_set():
-            try:
-                event = messages.get(timeout=0.2)
-            except queue.Empty:
-                continue
-            if event["status"] != "decoder_finished":
-                yield event
-                continue
-            return_code = process.wait(timeout=15)
-            if return_code or result.get("decode_error"):
-                # Never wait for the rest of an episode just to retry a decoder.
-                # A completed download may already exist, in which case seeking is cheap.
-                if downloaded.is_set() and result.get("complete") and result.get("decoded_chunks", 0) == 0:
-                    yield {"status": "audio_ready"}
-                    yield from local_audio_chunks(audio_path, work_dir, stopped, start_offset)
-                    return
-                raise RuntimeError("此音频无法流式解码或连接已中断，请检查音频源后重试。")
-            # Confirm the HTTP request really ended; an interrupted file is not EOF.
-            while not downloaded.wait(0.2):
-                if cancelled.is_set():
-                    return
-            if result.get("download_error") or not result.get("complete"):
-                raise RuntimeError("音频下载中断，请检查网络后刷新字幕。")
-            return
-    finally:
-        cancel.set()
-        if process.poll() is None:
-            process.kill()
-        downloader.join(timeout=20)
-        decoder.join(timeout=5)
-        process.wait(timeout=5)
-        process.stdin.close()
-        process.stdout.close()
-
-
-def groq_segments(chunk_path, api_key, proxies, stopped):
-    for attempt in range(3):
-        if stopped.is_set():
-            return None
-        # Release the Windows file handle before waiting for the API response.
-        payload = chunk_path.read_bytes()
-        response = requests.post(
-                "https://api.groq.com/openai/v1/audio/transcriptions",
-                headers={"Authorization": f"Bearer {api_key}"},
-                files={"file": (chunk_path.name, payload, "audio/wav")},
-                data={"model": "whisper-large-v3-turbo", "response_format": "verbose_json",
-                      "timestamp_granularities[]": "segment"},
-                timeout=(15, 120), proxies=proxies,
-            )
-        if response.status_code == 429 or response.status_code >= 500:
-            if attempt < 2:
-                try:
-                    delay = min(30, max(1, float(response.headers.get("Retry-After", 2 ** (attempt + 1)))))
-                except ValueError:
-                    delay = 2 ** (attempt + 1)
-                response.close()
-                if stopped.wait(delay):
-                    return None
-                continue
-        if not response.ok:
-            status = response.status_code
-            response.close()
-            raise TranscriptionError(f"Groq 转写失败（HTTP {status}），请检查密钥、额度或网络。", retryable=status == 429 or status >= 500)
-        try:
-            data = response.json()
-        finally:
-            response.close()
-        segments = data.get("segments")
-        if not isinstance(segments, list):
-            raise RuntimeError("Groq 未返回带时间戳的字幕，请重试。")
-        return segments
-
-
-def groq_api_keys():
-    first = os.environ.get("GROQ_API_KEY_1", "").strip() or os.environ.get("GROQ_API_KEY", "").strip()
-    second = os.environ.get("GROQ_API_KEY_2", "").strip()
-    values = [key.strip() for group in (first, second) for key in group.split(",") if key.strip()]
-    return list(dict.fromkeys(values))
-
-
-def alternating_transcriptions(chunks, api_keys, proxies, stopped, start_index=0):
-    """One worker per key, bounded lookahead, and results in episode order."""
-    cancel = threading.Event()
-    capacity = threading.Semaphore(len(api_keys))
-    messages = queue.Queue(maxsize=16)
-    jobs = [queue.Queue() for _ in api_keys]
-
-    class Signal:
-        def is_set(self):
-            return stopped.is_set() or cancel.is_set()
-
-        def wait(self, seconds):
-            deadline = time.monotonic() + seconds
-            while not self.is_set():
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    return False
-                cancel.wait(min(remaining, 0.2))
-            return True
-
-    signal = Signal()
-    if callable(chunks):
-        chunks = chunks(signal)
-
-    def send(message):
-        while not signal.is_set():
-            try:
-                messages.put(message, timeout=0.2)
-                return
-            except queue.Full:
-                pass
-
-    def worker(channel):
-        while not signal.is_set():
-            try:
-                item, future = jobs[channel].get(timeout=0.2)
-            except queue.Empty:
-                continue
-            if not future.set_running_or_notify_cancel():
-                continue
-            try:
-                future.set_result(groq_segments(item["path"], api_keys[channel], proxies, signal))
-            except Exception as exc:
-                future.set_exception(exc)
-            finally:
-                item["path"].unlink(missing_ok=True)
-
-    def dispatch():
-        index = start_index
-        try:
-            while not signal.is_set():
-                if not capacity.acquire(timeout=0.2):
-                    continue
-                try:
-                    item = next(chunks)
-                except StopIteration:
-                    capacity.release()
-                    break
-                if item["status"] != "chunk":
-                    capacity.release()
-                    send(item)
-                    continue
-                channel = index % len(api_keys)
-                index += 1
-                future = Future()
-                jobs[channel].put((item, future))
-                send({**item, "channel": channel + 1, "future": future})
-        except Exception as exc:
-            send({"status": "failed", "exception": exc})
-        finally:
-            try:
-                chunks.close()
-            except Exception as exc:
-                send({"status": "failed", "exception": exc})
-            finally:
-                send(None)
-
-    for channel in range(len(api_keys)):
-        threading.Thread(target=worker, args=(channel,), daemon=True).start()
-    dispatcher = threading.Thread(target=dispatch, daemon=True)
-    dispatcher.start()
-    try:
-        while not signal.is_set():
-            try:
-                item = messages.get(timeout=0.2)
-            except queue.Empty:
-                continue
-            if item is None:
-                return
-            if item["status"] == "failed":
-                raise item["exception"]
-            if item["status"] != "chunk":
-                yield item
-                continue
-            try:
-                offset, duration = item["offset"], item["duration"]
-                yield {"status": "progress", "detail": f"Groq 通道 {item['channel']} 正在转写 {offset / 60:.1f}–{(offset + duration) / 60:.1f} 分钟"}
-                while not signal.is_set():
-                    try:
-                        segments = item["future"].result(timeout=0.2)
-                        break
-                    except FutureTimeout:
-                        if item["future"].done():
-                            raise
-                        continue
-                else:
-                    return
-                if segments is None:
-                    return
-                yield {"status": "transcribed", "offset": offset, "duration": duration, "segments": segments}
-            finally:
-                capacity.release()
-    finally:
-        cancel.set()
-        dispatcher.join(timeout=25)
-
-
 def transcript_events(audio_url, transcript_url, force_refresh, cache_dir, proxies=None, stopped=None):
+    if stopped is not None and stopped.is_set():
+        return
+    path = corrections.path_for(cache_dir, audio_url)
+    if force_refresh:
+        path.unlink(missing_ok=True)
+    for event in _transcript_events(audio_url, transcript_url, force_refresh, cache_dir, proxies, stopped):
+        records = corrections.load(path)
+        if event['status'] == 'cue':
+            event = {**event, 'cue': corrections.apply([event['cue']], records)[0]}
+        elif event['status'] == 'resumed':
+            event = {**event, 'cues': corrections.apply(event['cues'], records)}
+        elif event['status'] in ('official', 'cached'):
+            event = {**event, 'vtt': corrections.apply_vtt(event['vtt'], records)}
+        yield event
+
+
+def _transcript_events(audio_url, transcript_url, force_refresh, cache_dir, proxies=None, stopped=None):
     stopped = stopped if stopped is not None else threading.Event()
     key, audio_path, vtt_path = cache_paths(cache_dir, audio_url)
-    checkpoint_path = Path(cache_dir) / f"{key}.progress.json"
+    checkpoint_key = key + '-aliyun-sentences-v2'
+    checkpoint_path = Path(cache_dir) / f"{checkpoint_key}.progress.json"
     lock = _locks[int(key[:8], 16) % len(_locks)]
     while not lock.acquire(timeout=0.2):
         if stopped.is_set():
             return
+    try:
         if force_refresh:
             checkpoint_path.unlink(missing_ok=True)
             vtt_path.unlink(missing_ok=True)
-    try:
         if stopped.is_set():
             return
         if transcript_url and not force_refresh:
@@ -460,69 +165,11 @@ def transcript_events(audio_url, transcript_url, force_refresh, cache_dir, proxi
                 yield {"status": "cached", "vtt": content, "local_audio": f"/cache/{key}.mp3"}
                 return
 
-        api_keys = groq_api_keys()
-        if not api_keys:
-            raise TranscriptionError("未配置 GROQ_API_KEY；请配置密钥后刷新字幕，字幕就绪后播放。", retryable=False)
+        if not aliyun.api_keys():
+            raise TranscriptionError("请在设置中填写阿里云百炼 API Key。", retryable=False)
         if not shutil.which("ffmpeg"):
             raise TranscriptionError("找不到 FFmpeg；请安装并加入 PATH 后重启服务。", retryable=False)
-
-        checkpoint = read_checkpoint(checkpoint_path)
-        resume_at, chunk_index = checkpoint["until"], checkpoint["next_chunk"]
-        if resume_at:
-            yield {"status": "resumed", "until": resume_at, "cues": checkpoint["cues"]}
-
-        # Start decoding incoming bytes immediately; never wait for the full download.
-        with tempfile.TemporaryDirectory(prefix="groq-", dir=cache_dir) as work_dir:
-            if force_refresh or not audio_path.exists() or not audio_path.stat().st_size:
-                yield {"status": "progress", "detail": "正在边下载边切片，首段字幕就绪后播放。"}
-                yield {"status": "audio_source", "audio_url": "/api/audio?url=" + requests.utils.quote(audio_url, safe="")}
-                chunks = lambda pipeline_stopped: remote_audio_chunks(audio_url, audio_path, work_dir, proxies, pipeline_stopped, resume_at)
-            else:
-                yield {"status": "audio_ready", "local_audio": f"/cache/{key}.mp3"}
-                chunks = lambda pipeline_stopped: local_audio_chunks(audio_path, work_dir, pipeline_stopped, resume_at)
-            cues = list(checkpoint["cues"])
-            results = alternating_transcriptions(chunks, api_keys, proxies, stopped, start_index=chunk_index)
-            try:
-                for item in results:
-                    if stopped.is_set():
-                        return
-                    if item["status"] == "audio_ready":
-                        yield {"status": "audio_ready", "local_audio": f"/cache/{key}.mp3"}
-                        continue
-                    if item["status"] != "transcribed":
-                        yield item
-                        continue
-                    offset, duration, segments = item["offset"], item["duration"], item["segments"]
-                    if segments is None or stopped.is_set():
-                        return
-                    new_cues = []
-                    for segment in segments:
-                        text = str(segment.get("text", "")).strip()
-                        start, end = float(segment.get("start", 0)), float(segment.get("end", 0))
-                        if not text or not math.isfinite(start) or not math.isfinite(end):
-                            continue
-                        start, end = max(0.0, start), min(duration, end)
-                        if end <= start:
-                            continue
-                        cue = {"start": start + offset, "end": end + offset, "text": text}
-                        new_cues.append(cue)
-                    cues.extend(new_cues)
-                    chunk_index += 1
-                    # Persist before announcing completion, including silent chunks.
-                    atomic_write(checkpoint_path, json.dumps({"version": 1, "until": offset + duration,
-                                 "next_chunk": chunk_index, "cues": cues}, ensure_ascii=False))
-                    for cue in new_cues:
-                        yield {"status": "cue", "cue": cue}
-                    yield {"status": "chunk_ready", "until": offset + duration}
-            finally:
-                results.close()
-            if not cues:
-                raise RuntimeError("Groq 未识别到语音，请刷新重试。")
-            if stopped.is_set():
-                return
-            atomic_write(vtt_path, to_vtt(cues))
-            checkpoint_path.unlink(missing_ok=True)
-            yield {"status": "done"}
+        yield from aliyun.transcript_events(audio_url, audio_path, vtt_path, checkpoint_path, proxies, stopped)
     except Exception as exc:
         # Avoid returning request URLs or authorization information in errors.
         detail = str(exc) if isinstance(exc, RuntimeError) else "字幕转写失败，请检查网络或音频后重试。"
@@ -531,8 +178,8 @@ def transcript_events(audio_url, transcript_url, force_refresh, cache_dir, proxi
         lock.release()
 
 
-def stream_with_heartbeat(events_factory):
-    stopped = threading.Event()
+def stream_with_heartbeat(events_factory, stopped=None):
+    stopped = stopped if stopped is not None else threading.Event()
     messages = queue.Queue(maxsize=32)
 
     def send(item):
@@ -550,6 +197,8 @@ def stream_with_heartbeat(events_factory):
                 if stopped.is_set():
                     break
                 send(event)
+                if event.get('status') in ('done', 'cached', 'official', 'error'):
+                    break
         finally:
             iterator.close()
             send(None)
@@ -557,7 +206,7 @@ def stream_with_heartbeat(events_factory):
     threading.Thread(target=produce, daemon=True).start()
     try:
         yield ": connected\n\n"
-        while True:
+        while not stopped.is_set():
             try:
                 event = messages.get(timeout=15)
             except queue.Empty:
@@ -566,5 +215,7 @@ def stream_with_heartbeat(events_factory):
             if event is None:
                 return
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+            if event.get('status') in ('done', 'cached', 'official', 'error'):
+                return
     finally:
         stopped.set()

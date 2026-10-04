@@ -15,10 +15,11 @@ def adb(*arguments, **kwargs):
 if __name__ == '__main__':
     # Older builds used a USB reverse tunnel on this port. Release it for the device-local server.
     subprocess.run(['adb', *(['-s', SERIAL] if SERIAL else []), 'reverse', '--remove', 'tcp:8557'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    adb('install', '-r', str(ROOT / 'android/app/build/outputs/apk/debug/app-debug.apk'))
+    adb('install', '--no-streaming', '-r', str(ROOT / 'android/app/build/outputs/apk/debug/app-debug.apk'), timeout=180)
     config = dotenv_values(ROOT / '.env')
-    fields = {'groq_key_1': config.get('GROQ_API_KEY_1') or config.get('GROQ_API_KEY'),
-              'groq_key_2': config.get('GROQ_API_KEY_2'), 'gemini_key': config.get('GEMINI_API_KEY')}
+    fields = {'aliyun_key_1': config.get('DASHSCOPE_API_KEY_1') or config.get('DASHSCOPE_API_KEY'),
+              'aliyun_key_2': config.get('DASHSCOPE_API_KEY_2'), 'gemini_key': config.get('GEMINI_API_KEY'),
+              'aliyun_region': config.get('ALIYUN_REGION') or 'beijing'}
     payload = json.dumps({name: value for name, value in fields.items() if value}).encode()
     adb('shell', f'run-as {PACKAGE} mkdir -p files')
     adb('shell', f"run-as {PACKAGE} sh -c 'umask 077; cat > files/provision.json'", input=payload, stdout=subprocess.DEVNULL)

@@ -6,10 +6,16 @@ android {
         applicationId 'com.podcastlearner.tablet'
         minSdk 23
         targetSdk 34
-        versionCode 2
-        versionName '2.0'
+        versionCode 4
+        versionName '3.1'
     }
     sourceSets.main.assets.srcDir layout.buildDirectory.dir('generated/assets')
+}
+dependencies {
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    implementation 'androidx.core:core:1.13.0'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
 }
 tasks.register('bundleWeb', Copy) {
     from '../../static'

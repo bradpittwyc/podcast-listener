@@ -1,6 +1,10 @@
 package com.podcastlearner.tablet;
 
 import android.content.Context;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.net.ProxyInfo;
 import android.media.MediaCodec;
 import android.media.MediaExtractor;
 import android.media.MediaFormat;
@@ -30,8 +34,16 @@ public final class NativeBackend implements AutoCloseable {
     private final ScheduledExecutorService timer = Executors.newScheduledThreadPool(1);
     private final Set<Socket> sockets = ConcurrentHashMap.newKeySet();
     private final ConcurrentHashMap<String,Semaphore> locks = new ConcurrentHashMap<>();
+    private final TranscriptionJobs transcriptionJobs=new TranscriptionJobs();
     private ServerSocket listener;
     private volatile boolean closed;
+    private final java.util.concurrent.atomic.AtomicInteger sentenceKey = new java.util.concurrent.atomic.AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicInteger dictionaryKey = new java.util.concurrent.atomic.AtomicInteger();
+    private Network asrNetwork;
+    private okhttp3.OkHttpClient asrClient;
+    private final Map<String,String> resolvedAudio=Collections.synchronizedMap(new LinkedHashMap<String,String>(128,.75f,true){
+        @Override protected boolean removeEldestEntry(Map.Entry<String,String> entry){return size()>128;}
+    });
 
     NativeBackend(Context context, JSONObject credentials, CredentialsWriter writer) {
         this.context = context; this.credentials = credentials; this.writer = writer;
@@ -49,9 +61,11 @@ public final class NativeBackend implements AutoCloseable {
     }
     @Override public void close() {
         closed=true;
+        transcriptionJobs.close();
         try { listener.close(); } catch (Exception ignored) {}
         for (Socket socket:sockets) try { socket.close(); } catch (Exception ignored) {}
         clients.shutdownNow(); timer.shutdownNow();
+        if(asrClient!=null)asrClient.connectionPool().evictAll();
     }
     static JSONObject object(Object... pairs) throws Exception {
         JSONObject result=new JSONObject(); for(int i=0;i<pairs.length;i+=2) result.put((String)pairs[i],pairs[i+1]); return result;
@@ -90,7 +104,15 @@ public final class NativeBackend implements AutoCloseable {
             if(length>0) { byte[] body=new byte[length]; int offset=0,count; while(offset<length && (count=input.read(body,offset,length-offset))>0)offset+=count; if(offset!=length)return; request.body=new JSONObject(new String(body,StandardCharsets.UTF_8)); }
             connection.setSoTimeout(0);
             try { route(request,connection,output); }
-            catch(Exception e) { response(output,500,"application/json",bytes(object("status","error","message",safeError(e)).toString())); }
+            catch(Exception e) {
+                StringBuilder types=new StringBuilder(request.path);
+                for(Throwable cause=e;cause!=null;cause=cause.getCause()){
+                    types.append(" ").append(cause.getClass().getSimpleName());
+                    if(cause instanceof android.system.ErrnoException)types.append(":").append(((android.system.ErrnoException)cause).errno);
+                }
+                android.util.Log.w("PodcastBackend",types.toString());
+                response(output,500,"application/json",bytes(object("status","error","message",safeError(e)).toString()));
+            }
         } catch(Exception ignored) {} finally { sockets.remove(socket); }
     }
     static void response(OutputStream output,int status,String type,byte[] body) throws IOException {
@@ -117,15 +139,20 @@ public final class NativeBackend implements AutoCloseable {
                 if(!r.headers.getOrDefault("content-type","").contains("application/json")) { response(output,415,"application/json",bytes("{}")); return; }
                 synchronized(this) {
                     JSONObject next=new JSONObject(credentials.toString());
-                    for(String name:new String[]{"groq_key_1","groq_key_2","gemini_key"}) {
+                    for(String name:new String[]{"aliyun_key_1","aliyun_key_2","gemini_key"}) {
                         Object value=r.body.opt(name); if(value==null)continue;
                         if(!(value instanceof String) || ((String)value).length()>512 || ((String)value).indexOf('\n')>=0 || ((String)value).indexOf('\r')>=0 || ((String)value).indexOf(0)>=0) throw new IOException("Invalid credentials");
                         if(!((String)value).trim().isEmpty())next.put(name,((String)value).trim());
                     }
-                    writer.save(next); credentials=next;
+                    String region=r.body.optString("aliyun_region",next.optString("aliyun_region","beijing"));
+                    if(!region.equals("beijing")&&!region.equals("singapore"))throw new IOException("Invalid region");
+                    next.put("aliyun_region",region);
+                    String dictionary=r.body.optString("dictionary_provider",next.optString("dictionary_provider","auto"));
+                    if(!dictionary.equals("auto")&&!dictionary.equals("qwen")&&!dictionary.equals("gemini"))throw new IOException("Invalid dictionary provider");
+                    next.put("dictionary_provider",dictionary);writer.save(next);credentials=next;
                 }
             }
-            json(output,object("configured",object("groq_key_1",!credentials.optString("groq_key_1").isEmpty(),"groq_key_2",!credentials.optString("groq_key_2").isEmpty(),"gemini_key",!credentials.optString("gemini_key").isEmpty()))); return;
+            json(output,object("configured",object("aliyun_key_1",!credentials.optString("aliyun_key_1").isEmpty(),"aliyun_key_2",!credentials.optString("aliyun_key_2").isEmpty(),"gemini_key",!credentials.optString("gemini_key").isEmpty()),"options",object("subtitle_provider","aliyun","aliyun_region",credentials.optString("aliyun_region","beijing"),"dictionary_provider",credentials.optString("dictionary_provider","auto")),"dictionary_route",dictionaryProvider())); return;
         }
         String country=r.q("country").isEmpty()?"us":r.q("country");
         if(r.path.equals("/api/top-charts")) {
@@ -142,6 +169,11 @@ public final class NativeBackend implements AutoCloseable {
         if(r.path.equals("/api/parse-feed") || r.path.equals("/api/feed")) { json(output,feed(r.q("url")));return; }
         if(r.path.equals("/api/audio")) { audio(r,output);return; }
         if(r.path.equals("/api/transcribe_stream")) { transcribe(r,socket,output);return; }
+        if(r.path.equals("/api/cancel_transcription") && r.method.equals("POST")) {
+            transcriptionJobs.cancel(TranscriptionJobs.token(r.body.optString("request_id")));
+            json(output,object("status","cancelled"));return;
+        }
+        if(r.path.equals("/api/retranscribe_sentence") && r.method.equals("POST")) { regenerate(r,output);return; }
         if(r.path.equals("/api/ask")) {
             if(!r.body.optBoolean("transcript_complete") || r.body.optString("full_transcript").trim().isEmpty()) { response(output,409,"application/json",bytes(object("detail","请等待全篇字幕加载完成").toString()));return; }
             String prompt="你是英语播客学习助教。以下是本期完整字幕，请结合全文推理、解释背景，以中文回答。\n【完整字幕】\n"+r.body.getString("full_transcript")+"\n【选中字幕】\n"+r.body.optString("selected_text")+"\n【问题】\n"+r.body.optString("question");
@@ -149,33 +181,102 @@ public final class NativeBackend implements AutoCloseable {
         }
         if(r.path.equals("/api/define")) {
             String prompt="Analyze English word '"+r.q("word")+"' in context '"+r.q("context")+"'. Return a JSON object with word, phonetic, pos, definition_en, translation_cn, example, example_cn, context_note. Use Chinese for translations and context_note.";
-            json(output,object("status","success","data",new JSONObject(gemini(prompt,true))));return;
+            String provider=dictionaryProvider();
+            json(output,object("status","success","provider",provider,"data",new JSONObject(provider.equals("qwen")?qwenDictionary(prompt):gemini(prompt,true))));return;
         }
         response(output,404,"application/json",bytes("{}"));
     }
-    static HttpURLConnection open(String url,String range) throws Exception {
+    private Network podcastNetwork() {
+        ConnectivityManager manager=(ConnectivityManager)context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        Network candidate=null;
+        if(manager==null)return null;
+        for(Network network:manager.getAllNetworks()) {
+            NetworkCapabilities caps=manager.getNetworkCapabilities(network);
+            if(caps==null || !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                || !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN))continue;
+            if(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED))return network;
+            candidate=network;
+        }
+        return candidate;
+    }
+    private synchronized okhttp3.OkHttpClient aliyunClient(String region) {
+        // NO_PROXY alone only skips HTTP proxies; the VPN still captures sockets
+        // and DNS. Beijing ASR uses the physical network for both, like RSS/audio.
+        Network network=region.equals("beijing")?podcastNetwork():null;
+        if(network==null)return AliyunStream.CLIENT;
+        if(asrClient==null || !network.equals(asrNetwork)) {
+            if(asrClient!=null)asrClient.connectionPool().evictAll();
+            asrNetwork=network;
+            asrClient=AliyunStream.CLIENT.newBuilder()
+                .socketFactory(network.getSocketFactory())
+                .dns(host -> Arrays.asList(network.getAllByName(host)))
+                .connectionPool(new okhttp3.ConnectionPool())
+                .build();
+        }
+        return asrClient;
+    }
+    private HttpURLConnection open(String url,String range) throws Exception {
+        // Bind both DNS and sockets to the underlying network for podcast traffic.
+        // Do not bind the entire process: Gemini still needs the user's VPN/proxy.
+        Network network=podcastNetwork();
         for(int attempts=0;attempts<8;attempts++) {
             URL address=new URL(url); if(!address.getProtocol().equals("https")&&!address.getProtocol().equals("http"))throw new IOException("Invalid URL");
-            HttpURLConnection connection=(HttpURLConnection)address.openConnection(); connection.setInstanceFollowRedirects(false);
-            connection.setConnectTimeout(20000);connection.setReadTimeout(30000);connection.setRequestProperty("User-Agent","Mozilla/5.0");
-            if(range!=null)connection.setRequestProperty("Range",range);
-            int code=connection.getResponseCode();
+            HttpURLConnection connection=null;
+            int code;
+            try {
+                connection=(HttpURLConnection)(network==null?address.openConnection():network.openConnection(address,Proxy.NO_PROXY));
+                configurePodcastConnection(connection,range);
+                code=connection.getResponseCode();
+            } catch(IOException directError) {
+                if(connection!=null)connection.disconnect();
+                if(network==null)throw directError;
+                // Some VPNs forbid bypass, or a feed may require the proxy. Retry
+                // on the system route without changing the Gemini route.
+                connection=(HttpURLConnection)address.openConnection();
+                configurePodcastConnection(connection,range);
+                try {code=connection.getResponseCode();}catch(IOException fallbackError){connection.disconnect();fallbackError.addSuppressed(directError);throw fallbackError;}
+            }
             if(code>=300&&code<400&&connection.getHeaderField("Location")!=null) {url=new URL(address,connection.getHeaderField("Location")).toString();connection.disconnect();continue;}
             return connection;
         } throw new IOException("Too many redirects");
     }
-    static JSONObject getJson(String url) throws Exception {
+    private static void configurePodcastConnection(HttpURLConnection connection,String range) {
+        connection.setInstanceFollowRedirects(false);
+        connection.setConnectTimeout(8000);connection.setReadTimeout(30000);connection.setRequestProperty("User-Agent","Mozilla/5.0");
+        if(range!=null)connection.setRequestProperty("Range",range);
+    }
+    private JSONObject getJson(String url) throws Exception {
         HttpURLConnection connection=open(url,null);try {int code=connection.getResponseCode();if(code!=200)throw new CloudError(code);return new JSONObject(new String(read(connection.getInputStream(),12*1024*1024),StandardCharsets.UTF_8));}finally {connection.disconnect();}
     }
     private void audio(RequestData r,OutputStream output) throws Exception {
-        HttpURLConnection connection=open(r.q("url"),r.headers.get("range"));
+        TranscriptionJobs.Control control=transcriptionJobs.get(r.q("request_id"));
+        if(control!=null && control.stopped.get())throw new IOException("Cancelled");
+        String original=r.q("url"), resolved=resolvedAudio.get(original);
+        HttpURLConnection connection;
+        try {connection=open(resolved==null?original:resolved,r.headers.get("range"));}
+        catch(IOException error){
+            if(resolved==null)throw error;
+            resolvedAudio.remove(original);connection=open(original,r.headers.get("range"));
+        }
+        if(resolved!=null && connection.getResponseCode()!=200 && connection.getResponseCode()!=206){
+            connection.disconnect();resolvedAudio.remove(original);connection=open(original,r.headers.get("range"));
+        }
+        final HttpURLConnection source=connection;
+        Runnable remove=control==null?()->{}:control.onCancel(source::disconnect);
         try {
+            if(control!=null && control.stopped.get())throw new IOException("Cancelled");
             int code=connection.getResponseCode(); if(code!=200&&code!=206)throw new CloudError(code);
+            // MediaExtractor seeks repeatedly. Replaying all tracking redirects
+            // for every Range request can take minutes before decoding starts.
+            resolvedAudio.put(original,connection.getURL().toString());
             String headers="HTTP/1.1 "+code+" OK\r\nContent-Type: "+Optional.ofNullable(connection.getContentType()).orElse("audio/mpeg")+"\r\nConnection: close\r\nAccept-Ranges: bytes\r\n";
             for(String name:new String[]{"Content-Length","Content-Range"}) {String value=connection.getHeaderField(name);if(value!=null)headers+=name+": "+value+"\r\n";}
             output.write(bytes(headers+"\r\n")); output.flush();
+            // Headers are already committed. On disconnect, close this audio
+            // response; do not append an HTTP 500 JSON response to MP3 bytes.
             try(InputStream input=connection.getInputStream()) {byte[] buffer=new byte[16384];int count;while(!closed&&(count=input.read(buffer))!=-1){output.write(buffer,0,count);}}
-        } finally {connection.disconnect();}
+            catch(IOException ignored){}
+        } finally {remove.run();connection.disconnect();}
     }
     private JSONObject feed(String url) throws Exception {
         HttpURLConnection connection=open(url,null);
@@ -225,34 +326,140 @@ public final class NativeBackend implements AutoCloseable {
         } finally {connection.disconnect();}
     }
     static class CloudError extends IOException { final int status;CloudError(int status){super("云服务返回 HTTP "+status);this.status=status;} }
+    static String chooseDictionaryProvider(String preference,boolean proxyActive) {
+        return preference.equals("auto")?(proxyActive?"gemini":"qwen"):preference;
+    }
+    private String dictionaryProvider() {
+        ConnectivityManager manager=(ConnectivityManager)context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        boolean active=false;
+        if(manager!=null) {
+            NetworkCapabilities caps=manager.getNetworkCapabilities(manager.getActiveNetwork());
+            ProxyInfo proxy=manager.getDefaultProxy();
+            active=(caps!=null && caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN))
+                || (proxy!=null && ((proxy.getHost()!=null && proxy.getPort()>0)
+                    || !android.net.Uri.EMPTY.equals(proxy.getPacFileUrl())));
+        }
+        return chooseDictionaryProvider(credentials.optString("dictionary_provider","auto"),active);
+    }
     private HttpURLConnection cloudConnection(String url) throws Exception {
-        // Use the local Clash HTTP tunnel when available; TLS remains end-to-end verified.
-        // This avoids relying on VPN per-app routing and device-side DNS for cloud APIs.
-        boolean localProxy=false;
-        try(Socket probe=new Socket()){probe.connect(new InetSocketAddress("127.0.0.1",7890),200);localProxy=true;}catch(IOException ignored){}
-        return (HttpURLConnection)new URL(url).openConnection(localProxy
-            ? new Proxy(Proxy.Type.HTTP,new InetSocketAddress("127.0.0.1",7890)) : Proxy.NO_PROXY);
+        // Honor the active VPN's advertised proxy (Clash ports can be dynamic).
+        ConnectivityManager manager=(ConnectivityManager)context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        ProxyInfo proxyInfo=manager==null?null:manager.getDefaultProxy();
+        if(proxyInfo!=null && proxyInfo.getHost()!=null && proxyInfo.getPort()>0)
+            return (HttpURLConnection)new URL(url).openConnection(new Proxy(Proxy.Type.HTTP,
+                new InetSocketAddress(proxyInfo.getHost(),proxyInfo.getPort())));
+        // A listening 7890 port can belong to an inactive Clash profile. Without
+        // an advertised HTTP proxy, use the active VPN's normal system route.
+        return (HttpURLConnection)new URL(url).openConnection();
     }
     private CloudError cloudError(HttpURLConnection connection,String service) {
         int status=500;String detail="";
         try {status=connection.getResponseCode();String body=new String(read(connection.getErrorStream(),16384),StandardCharsets.UTF_8);JSONObject error=new JSONObject(body).optJSONObject("error");if(error!=null)detail=error.optString("message");}catch(Exception ignored){}
-        for(String name:new String[]{"groq_key_1","groq_key_2","gemini_key"}){String key=credentials.optString(name);if(!key.isEmpty())detail=detail.replace(key,"[redacted]");}
+        for(String name:new String[]{"aliyun_key_1","aliyun_key_2","gemini_key"}){String key=credentials.optString(name);if(!key.isEmpty())detail=detail.replace(key,"[redacted]");}
         final String message=service+" HTTP "+status+(detail.isEmpty()?"":"："+detail);
         return new CloudError(status){@Override public String getMessage(){return message;}};
     }
     static String safeError(Exception error) {
-        Throwable cause=error;while(cause.getCause()!=null)cause=cause.getCause();
-        if(cause instanceof CloudError)return cause.getMessage();
+        for(Throwable cause=error;cause!=null;cause=cause.getCause()){
+        if(cause instanceof CloudError || cause instanceof AliyunStream.Failure)return cause.getMessage();
+        if(cause instanceof java.net.UnknownHostException)return "无法解析播客服务器地址，请检查网络或代理的 DNS 设置。";
+        if(cause instanceof java.net.ConnectException)return "无法连接播客服务器，请检查网络或代理连接。";
+        if(cause instanceof java.net.SocketTimeoutException)return "播客服务器连接超时，请重试或检查代理节点。";
+        if(cause instanceof javax.net.ssl.SSLException)return "播客服务器的安全连接失败，请检查设备时间和代理。";
+        }
         return "请求失败，请检查设备网络、API Key 或音频格式后重试。";
     }
     private class Events {
-        final OutputStream output;final AtomicBoolean stopped=new AtomicBoolean();
-        Events(OutputStream output){this.output=output;}
-        synchronized void send(JSONObject item) throws IOException { if(stopped.get())throw new IOException("Cancelled");try{output.write(bytes("data: "+item+"\n\n"));output.flush();}catch(IOException e){stopped.set(true);throw e;} }
+        final OutputStream output;final TranscriptionJobs.Control control;final AtomicBoolean stopped;
+        String jobId="";
+        AtomicFile correctionsFile;
+        double recognitionStart=Double.NEGATIVE_INFINITY,recognitionEnd=Double.POSITIVE_INFINITY;
+        Events(OutputStream output){this(output,new TranscriptionJobs.Control());}
+        Events(OutputStream output,TranscriptionJobs.Control control){this.output=output;this.control=control;this.stopped=control.stopped;}
+        synchronized void send(JSONObject item) throws IOException {
+            if(stopped.get())throw new IOException("Cancelled");
+            try {
+                if(correctionsFile!=null){JSONArray records=load(correctionsFile).optJSONArray("cues");
+                    if(item.optString("status").equals("cue"))item.put("cue",correctCue(item.getJSONObject("cue"),records));
+                    if(item.optString("status").equals("resumed"))item.put("cues",correctCues(item.getJSONArray("cues"),records));
+                }
+                output.write(bytes("data: "+item+"\n\n"));output.flush();
+            }catch(Exception e){control.stop();throw new IOException("Subtitle connection interrupted",e);}
+        }
+    }
+    private String qwenDictionary(String prompt) throws Exception {
+        JSONObject config=credentials;
+        List<String> keys=new ArrayList<>();
+        for(String name:new String[]{"aliyun_key_1","aliyun_key_2"}){String key=config.optString(name).trim();if(!key.isEmpty()&&!keys.contains(key))keys.add(key);}
+        if(keys.isEmpty())throw new AliyunStream.Failure("请在设置中填写阿里云百炼 Key。",false);
+        String region=config.optString("aliyun_region","beijing");
+        String host=region.equals("singapore")?"dashscope-intl.aliyuncs.com":"dashscope.aliyuncs.com";
+        JSONObject payload=object("model","qwen-flash","enable_thinking",false,"response_format",object("type","json_object"),
+            "messages",new JSONArray().put(object("role","user","content",prompt)));
+        okhttp3.Request request=new okhttp3.Request.Builder().url("https://"+host+"/compatible-mode/v1/chat/completions")
+            .header("Authorization","Bearer "+keys.get(Math.floorMod(dictionaryKey.getAndIncrement(),keys.size())))
+            .post(okhttp3.RequestBody.create(bytes(payload.toString()),okhttp3.MediaType.get("application/json"))).build();
+        try(okhttp3.Response response=aliyunClient(region).newBuilder().readTimeout(60,TimeUnit.SECONDS)
+            .callTimeout(75,TimeUnit.SECONDS).build().newCall(request).execute()) {
+            if(!response.isSuccessful())throw new CloudError(response.code()){
+                @Override public String getMessage(){return "Qwen 查词返回 HTTP "+status+"，请检查阿里云密钥、权限或额度。";}
+            };
+            JSONObject result=new JSONObject(new String(read(response.body().byteStream(),1024*1024),StandardCharsets.UTF_8));
+            return result.getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content");
+        }
+    }
+    private AtomicFile corrections(String url) throws Exception {return new AtomicFile(new File(checkpoint(url).getBaseFile().getPath()+".corrections"));}
+    private static boolean sameRange(JSONObject a,JSONObject b) {
+        return Math.abs(a.optDouble("source_start",a.optDouble("start"))-b.optDouble("source_start",b.optDouble("start")))<.002
+            && Math.abs(a.optDouble("source_end",a.optDouble("end"))-b.optDouble("source_end",b.optDouble("end")))<.002;
+    }
+    private static JSONObject correctCue(JSONObject cue,JSONArray records) throws Exception {
+        if(records!=null)for(int i=0;i<records.length();i++)if(sameRange(cue,records.getJSONObject(i)))return records.getJSONObject(i);
+        return cue;
+    }
+    private static JSONArray correctCues(JSONArray cues,JSONArray records) throws Exception {
+        JSONArray result=new JSONArray();for(int i=0;i<cues.length();i++)result.put(correctCue(cues.getJSONObject(i),records));return result;
+    }
+    private void regenerate(RequestData request,OutputStream output) throws Exception {
+        String url=request.body.optString("audio_url");double start=request.body.optDouble("start",Double.NaN),end=request.body.optDouble("end",Double.NaN);
+        if(!(url.startsWith("https://")||url.startsWith("http://"))||!Double.isFinite(start)||!Double.isFinite(end)||start<0||end<=start||end-start>300){
+            response(output,400,"application/json",bytes(object("detail","单句音频范围无效，最长支持 5 分钟。").toString()));return;
+        }
+        AtomicFile overrides=corrections(url);JSONArray previous=load(overrides).optJSONArray("cues");
+        if(previous!=null)for(int i=0;i<previous.length();i++){JSONObject cue=previous.getJSONObject(i);
+            if(Math.abs(cue.getDouble("start")-start)<.002&&Math.abs(cue.getDouble("end")-end)<.002){start=cue.getDouble("source_start");end=cue.getDouble("source_end");break;}}
+        List<String> keys=new ArrayList<>();for(String name:new String[]{"aliyun_key_1","aliyun_key_2"}){String key=credentials.optString(name);if(!key.isEmpty()&&!keys.contains(key))keys.add(key);}
+        if(keys.isEmpty())throw new AliyunStream.Failure("请在设置中填写阿里云百炼 Key。",false);
+        JSONArray recognized=new JSONArray();final double from=start,to=end;
+        String token=TranscriptionJobs.token(request.body.optString("request_id"));
+        TranscriptionJobs.Control control=transcriptionJobs.register(token);
+        Events capture=new Events(new ByteArrayOutputStream(),control){
+            @Override synchronized void send(JSONObject event) throws IOException {
+                try{if(event.optString("status").equals("cue")){
+                    JSONObject cue=event.getJSONObject("cue");double middle=(cue.getDouble("start")+cue.getDouble("end"))/2;
+                    if(middle>=from&&middle<=to)recognized.put(cue);
+                }}catch(Exception e){throw new IOException("Invalid sentence result",e);}
+            }
+        };
+        capture.jobId=token;
+        capture.recognitionStart=start;capture.recognitionEnd=end;
+        AtomicFile temporary=new AtomicFile(File.createTempFile("sentence-",".json",context.getCacheDir()));
+        try {
+            decode(url,Math.max(0,start-.5),sentenceKey.getAndIncrement(),new JSONArray(),null,keys,temporary,capture,end+.5);
+            if(control.stopped.get())throw new IOException("Cancelled");
+            JSONObject result=null;for(int i=0;i<recognized.length();i++)result=AliyunStream.append(result,recognized.getJSONObject(i));
+            if(result==null)throw new AliyunStream.Failure("这一句未识别到语音，原字幕已保留。",true);
+            result.put("start",Math.max(start,result.getDouble("start"))).put("end",Math.min(end,result.getDouble("end")))
+                .put("source_start",start).put("source_end",end);
+            synchronized(this){JSONArray records=load(overrides).optJSONArray("cues"),next=new JSONArray();
+                if(records!=null)for(int i=0;i<records.length();i++)if(!sameRange(result,records.getJSONObject(i)))next.put(records.getJSONObject(i));
+                next.put(result);store(overrides,object("cues",next));}
+            json(output,object("status","success","cue",result));
+        } finally {transcriptionJobs.release(token,control);temporary.delete();}
     }
     private AtomicFile checkpoint(String url) throws Exception {
         byte[] digest=MessageDigest.getInstance("SHA-256").digest(bytes(url));StringBuilder name=new StringBuilder();for(byte value:digest)name.append(String.format("%02x",value&255));
-        File folder=new File(context.getFilesDir(),"transcripts");folder.mkdirs();return new AtomicFile(new File(folder,name+".json"));
+        File folder=new File(context.getFilesDir(),"transcripts");folder.mkdirs();return new AtomicFile(new File(folder,name+"-aliyun-sentences-v2.json"));
     }
     private JSONObject load(AtomicFile file) {try{return new JSONObject(new String(read(file.openRead(),12*1024*1024),StandardCharsets.UTF_8));}catch(Exception e){return new JSONObject();}}
     private void store(AtomicFile file,JSONObject value) throws Exception {
@@ -260,98 +467,137 @@ public final class NativeBackend implements AutoCloseable {
     }
     private void transcribe(RequestData request,Socket socket,OutputStream output) throws Exception {
         output.write(bytes("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n"));output.flush();
-        Events events=new Events(output);String url=request.q("audio_url");Semaphore lock=locks.computeIfAbsent(url,key->new Semaphore(1));
-        ScheduledFuture<?> heartbeat=timer.scheduleAtFixedRate(()->{try{events.send(object("status","heartbeat"));}catch(Exception e){events.stopped.set(true);}},10,10,TimeUnit.SECONDS);
+        String token=TranscriptionJobs.token(request.q("request_id"));
+        TranscriptionJobs.Control control=transcriptionJobs.register(token);
+        control.onCancel(()->{try{socket.close();}catch(IOException ignored){}});
+        Events events=new Events(output,control);events.jobId=token;String url=request.q("audio_url");events.correctionsFile=corrections(url);Semaphore lock=locks.computeIfAbsent(url,key->new Semaphore(1));
+        ScheduledFuture<?> heartbeat=timer.scheduleAtFixedRate(()->{try{events.send(object("status","heartbeat"));}catch(Exception e){control.stop();}},10,10,TimeUnit.SECONDS);
         boolean acquired=false;
         try {
             while(!(acquired=lock.tryAcquire(1,TimeUnit.SECONDS)))if(events.stopped.get()||closed)return;
-            AtomicFile file=checkpoint(url);if(request.q("force_refresh").equals("true"))file.delete();JSONObject state=load(file);
+            if(events.stopped.get()||closed)return;
+            AtomicFile file=checkpoint(url);if(request.q("force_refresh").equals("true")){file.delete();events.correctionsFile.delete();}JSONObject state=load(file);
             JSONArray cues=state.optJSONArray("cues");if(cues==null)cues=new JSONArray();
-            if(state.optBoolean("complete")){events.send(object("status","cached","vtt",vtt(cues)));return;}
+            if(state.optBoolean("complete")){events.send(object("status","cached","vtt",vtt(correctCues(cues,load(events.correctionsFile).optJSONArray("cues")))));return;}
             String transcript=request.q("transcript_url");
             if(!transcript.isEmpty()&&state.optDouble("until",0)==0) {
                 try {HttpURLConnection cc=open(transcript,null);String content;try{content=new String(read(cc.getInputStream(),12*1024*1024),StandardCharsets.UTF_8);}finally{cc.disconnect();}
                     if(content.startsWith("WEBVTT")&&content.contains("-->")){events.send(object("status","official","vtt",content));return;}
                 } catch(Exception ignored){}
             }
-            List<String> keys=new ArrayList<>();for(String name:new String[]{"groq_key_1","groq_key_2"}){String key=credentials.optString(name).trim();if(!key.isEmpty()&&!keys.contains(key))keys.add(key);}
-            if(keys.isEmpty()){events.send(object("status","error","detail","请在设置中填写 Groq Key","retryable",false));return;}
+            List<String> keys=new ArrayList<>();for(String name:new String[]{"aliyun_key_1","aliyun_key_2"}){String key=credentials.optString(name).trim();if(!key.isEmpty()&&!keys.contains(key))keys.add(key);}
+            if(keys.isEmpty()){events.send(object("status","error","detail","请在设置中填写 Alibaba Key","retryable",false));return;}
             double until=state.optDouble("until",0);int index=state.optInt("next_chunk",0);
-            if(until>0)events.send(object("status","resumed","until",until,"cues",cues));
+            JSONObject fragment=state.optJSONObject("pending_sentence");
+            double coverage=fragment==null?until:(cues.length()==0?0:cues.getJSONObject(cues.length()-1).getDouble("end"));
+            events.send(object("status","resumed","until",coverage,"cues",cues));
             events.send(object("status","audio_source","audio_url","/api/audio?url="+encode(url)));
             events.send(object("status","progress","detail","设备正在流式下载并解码，首段字幕就绪后播放。"));
-            decode(url,until,index,cues,keys,file,events);
+            decode(url,until,index,cues,fragment,keys,file,events);
         } catch(Exception error) {
-            if(!events.stopped.get())try {Throwable cause=error;while(cause.getCause()!=null)cause=cause.getCause();boolean retryable=!(cause instanceof CloudError)||((CloudError)cause).status==429||((CloudError)cause).status>=500;
+            if(!events.stopped.get())try {Throwable cause=error;while(cause.getCause()!=null)cause=cause.getCause();boolean retryable=cause instanceof AliyunStream.Failure?((AliyunStream.Failure)cause).retryable:(!(cause instanceof CloudError)||((CloudError)cause).status==429||((CloudError)cause).status>=500);
                 events.send(object("status","error","detail",safeError(error),"retryable",retryable));}catch(Exception ignored){}
-        } finally {events.stopped.set(true);heartbeat.cancel(true);if(acquired)lock.release();}
+        } finally {transcriptionJobs.release(token,control);heartbeat.cancel(true);if(acquired)lock.release();}
     }
     private static String time(double seconds) {long millis=Math.round(seconds*1000);return String.format(Locale.US,"%02d:%02d:%02d.%03d",millis/3600000,(millis/60000)%60,(millis/1000)%60,millis%1000);}
     private static String vtt(JSONArray cues) throws Exception {StringBuilder result=new StringBuilder("WEBVTT\n\n");for(int i=0;i<cues.length();i++){JSONObject cue=cues.getJSONObject(i);result.append(time(cue.getDouble("start"))).append(" --> ").append(time(cue.getDouble("end"))).append('\n').append(cue.getString("text")).append("\n\n");}return result.toString();}
 
-    private static class Slice {byte[] wav;double offset,duration;int index;Future<JSONArray> result;}
-    private JSONArray groq(byte[] wav,String key,AtomicBoolean stopped) throws Exception {
-        for(int attempt=0;attempt<3&&!stopped.get();attempt++) {
-            HttpURLConnection connection=cloudConnection("https://api.groq.com/openai/v1/audio/transcriptions");
-            connection.setConnectTimeout(20000);connection.setReadTimeout(90000);connection.setRequestMethod("POST");connection.setDoOutput(true);
-            String boundary="Podcast"+UUID.randomUUID().toString().replace("-","");connection.setRequestProperty("Authorization","Bearer "+key);connection.setRequestProperty("Content-Type","multipart/form-data; boundary="+boundary);
-            connection.setRequestProperty("User-Agent","python-requests/2.32.5");
-            connection.setRequestProperty("Accept","application/json");
-            ByteArrayOutputStream payload=new ByteArrayOutputStream();
-            for(String[] entry:new String[][]{{"model","whisper-large-v3-turbo"},{"response_format","verbose_json"},{"timestamp_granularities[]","segment"}})payload.write(bytes("--"+boundary+"\r\nContent-Disposition: form-data; name=\""+entry[0]+"\"\r\n\r\n"+entry[1]+"\r\n"));
-            payload.write(bytes("--"+boundary+"\r\nContent-Disposition: form-data; name=\"file\"; filename=\"slice.wav\"\r\nContent-Type: audio/wav\r\n\r\n"));payload.write(wav);payload.write(bytes("\r\n--"+boundary+"--\r\n"));
-            try {
-                connection.setFixedLengthStreamingMode(payload.size());try(OutputStream stream=connection.getOutputStream()){payload.writeTo(stream);}
-                int code=connection.getResponseCode();if(code!=200){if((code==429||code>=500)&&attempt<2){Thread.sleep(1000L*(attempt+1));continue;}throw cloudError(connection,"Groq");}
-                JSONObject response=new JSONObject(new String(read(connection.getInputStream(),4*1024*1024),StandardCharsets.UTF_8));JSONArray segments=response.optJSONArray("segments");
-                if(segments==null)throw new IOException("No timestamp segments");return segments;
-            } finally {connection.disconnect();}
-        } throw new IOException("Cancelled");
+    private double length(double offset) {return offset<300?Math.min(30,300-offset):offset<900?Math.min(120,900-offset):300;}
+    private class StreamingPipeline implements AutoCloseable {
+        final ArrayDeque<AliyunStream> tasks=new ArrayDeque<>();
+        final JSONArray cues;final List<String> keys;final AtomicFile file;final Events events;final String region;
+        JSONObject fragment; AliyunStream current;double offset;int index;
+        double windowStart=Double.NEGATIVE_INFINITY,windowEnd=Double.POSITIVE_INFINITY;
+        StreamingPipeline(double offset,int index,JSONArray cues,JSONObject fragment,List<String> keys,AtomicFile file,Events events){
+            this.offset=offset;this.index=index;this.cues=cues;this.fragment=fragment;this.keys=keys;this.file=file;this.events=events;
+            region=credentials.optString("aliyun_region","beijing");
+        }
+        void checkpoint(double until,int next,boolean complete) throws Exception {
+            JSONObject state=object("until",until,"next_chunk",next,"cues",cues,"complete",complete);
+            if(fragment!=null)state.put("pending_sentence",fragment);store(file,state);
+        }
+        void drain(boolean wait) throws Exception {
+            while(!tasks.isEmpty()&&!events.stopped.get()&&!closed){
+                AliyunStream first=tasks.peek();JSONObject message=first.messages.poll();
+                if(message==null){first.check();if(!wait)return;Thread.sleep(20);continue;}
+                if(message.getString("status").equals("finished")){
+                    checkpoint(first.offset+first.duration,first.index+1,false);
+                    if(fragment==null)events.send(object("status","chunk_ready","until",first.offset+first.duration));
+                    tasks.remove().close();return;
+                }
+                JSONObject cue=message.getJSONObject("cue");double end=Math.min(cue.getDouble("end"),first.offset+first.duration);
+                if(cue.getDouble("start")<first.offset||end<=cue.getDouble("start"))continue;cue.put("end",end);
+                fragment=AliyunStream.append(fragment,cue);boolean complete=AliyunStream.endsSentence(fragment.getString("text"));
+                JSONObject ready=fragment;
+                if(complete){cues.put(fragment);fragment=null;}
+                checkpoint(end,first.index,false);
+                if(complete){events.send(object("status","cue","cue",ready));events.send(object("status","chunk_ready","until",end));}
+            }
+        }
+        void send(byte[] pcm) throws Exception {
+            if(events.stopped.get()||closed)throw new IOException("Cancelled");
+            drain(false);
+            if(current==null){
+                while(tasks.size()>=keys.size()){drain(true);if(events.stopped.get()||closed)throw new IOException("Cancelled");}
+                current=new AliyunStream(aliyunClient(region),keys.get(index%keys.size()),region,offset,index,events.control);tasks.add(current);
+                current.windowStart=windowStart;current.windowEnd=windowEnd;
+                events.send(object("status","progress","detail","Alibaba Key "+(index%keys.size()+1)+" streaming task "+(index+1)));
+            }
+            // Split a PCM frame exactly at the task boundary, including resumed offsets.
+            int available=Math.max(2,(int)Math.round((length(offset)-current.duration)*32000));available-=available%2;
+            if(pcm.length>available){send(Arrays.copyOfRange(pcm,0,available));send(Arrays.copyOfRange(pcm,available,pcm.length));return;}
+            current.send(pcm);
+            if(current.duration>=length(offset)-.00001){current.finish();offset+=current.duration;index++;current=null;}
+            drain(false);
+        }
+        void finish() throws Exception {
+            if(events.stopped.get()||closed)return;
+            events.send(object("status","finishing"));
+            if(current!=null){current.finish();offset+=current.duration;index++;current=null;}
+            while(!tasks.isEmpty()&&!events.stopped.get()&&!closed)drain(true);
+            if(events.stopped.get()||closed)return;
+            if(fragment!=null){JSONObject ready=fragment;cues.put(ready);fragment=null;checkpoint(offset,index,false);events.send(object("status","cue","cue",ready));}
+            if(cues.length()==0)throw new IOException("No speech recognized");
+            checkpoint(offset,index,true);events.send(object("status","done"));
+        }
+        @Override public void close(){for(AliyunStream task:tasks)task.close();tasks.clear();}
     }
-    private byte[] wav(byte[] pcm,int rate) {
-        ByteBuffer data=ByteBuffer.allocate(44+pcm.length).order(ByteOrder.LITTLE_ENDIAN);data.put(bytes("RIFF")).putInt(36+pcm.length).put(bytes("WAVEfmt ")).putInt(16).putShort((short)1).putShort((short)1).putInt(rate).putInt(rate*2).putShort((short)2).putShort((short)16).put(bytes("data")).putInt(pcm.length).put(pcm);return data.array();
+    private void decode(String url,double resume,int firstIndex,JSONArray cues,JSONObject fragment,List<String> keys,AtomicFile file,Events events) throws Exception {
+        decode(url,resume,firstIndex,cues,fragment,keys,file,events,Double.POSITIVE_INFINITY);
     }
-    private int length(double offset) {return offset<300?30:offset<900?120:300;}
-    private void completeSlice(Slice slice,JSONArray cues,AtomicFile file,Events events) throws Exception {
-        JSONArray segments=slice.result.get();
-        int first=cues.length();for(int i=0;i<segments.length();i++){JSONObject segment=segments.getJSONObject(i);double start=Math.max(0,segment.optDouble("start",0)),end=Math.min(slice.duration,segment.optDouble("end",0));String text=segment.optString("text").trim();if(end>start&&!text.isEmpty())cues.put(object("start",slice.offset+start,"end",slice.offset+end,"text",text));}
-        store(file,object("until",slice.offset+slice.duration,"next_chunk",slice.index+1,"cues",cues,"complete",false));
-        for(int i=first;i<cues.length();i++)events.send(object("status","cue","cue",cues.getJSONObject(i)));
-        events.send(object("status","chunk_ready","until",slice.offset+slice.duration));
-    }
-    private void decode(String url,double resume,int firstIndex,JSONArray cues,List<String> keys,AtomicFile file,Events events) throws Exception {
+    private void decode(String url,double resume,int firstIndex,JSONArray cues,JSONObject fragment,List<String> keys,AtomicFile file,Events events,double endAt) throws Exception {
         MediaExtractor extractor=new MediaExtractor();MediaCodec codec=null;
-        List<ExecutorService> workers=new ArrayList<>();for(String ignored:keys)workers.add(Executors.newSingleThreadExecutor());
-        ArrayDeque<Slice> pending=new ArrayDeque<>();
+        StreamingPipeline pipeline=new StreamingPipeline(resume,firstIndex,cues,fragment,keys,file,events);
+        pipeline.windowStart=events.recognitionStart;pipeline.windowEnd=events.recognitionEnd;
         try {
-            extractor.setDataSource(url,Collections.singletonMap("User-Agent","PodcastLearner/2.0"));
+            events.send(object("status","progress","detail","正在连接音频来源，连接后开始阿里云转写。"));
+            if(events.stopped.get()||closed)return;
+            extractor.setDataSource("http://127.0.0.1:8557/api/audio?url="+encode(url)+"&request_id="+encode(events.jobId),Collections.singletonMap("User-Agent","PodcastLearner/2.0"));
             MediaFormat format=null;for(int i=0;i<extractor.getTrackCount();i++){MediaFormat candidate=extractor.getTrackFormat(i);if(candidate.getString(MediaFormat.KEY_MIME).startsWith("audio/")){format=candidate;extractor.selectTrack(i);break;}}
             if(format==null)throw new IOException("No supported audio track");
+            if(format.containsKey(MediaFormat.KEY_DURATION))endAt=Math.min(endAt,format.getLong(MediaFormat.KEY_DURATION)/1000000.0+.25);
+            events.send(object("status","progress","detail","音频已连接，正在解码并上传阿里云。"));
             codec=MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME));codec.configure(format,null,null,0);codec.start();
             int sourceRate=format.getInteger(MediaFormat.KEY_SAMPLE_RATE),channels=format.getInteger(MediaFormat.KEY_CHANNEL_COUNT),encoding=AudioFormat.ENCODING_PCM_16BIT;
-            int targetRate=16000,index=firstIndex;long sourceFrame=0,nextTargetFrame=0,skip=Math.round(resume*targetRate);double offset=resume;
+            int targetRate=16000;long sourceFrame=0,nextTargetFrame=0,skip=Math.round(resume*targetRate);
             ByteArrayOutputStream pcm=new ByteArrayOutputStream();boolean inputEnded=false,outputEnded=false;MediaCodec.BufferInfo info=new MediaCodec.BufferInfo();
             while(!outputEnded&&!events.stopped.get()&&!closed) {
-                while(!pending.isEmpty()&&pending.peek().result.isDone())completeSlice(pending.remove(),cues,file,events);
+                pipeline.drain(false);
                 if(!inputEnded){int inputIndex=codec.dequeueInputBuffer(10000);if(inputIndex>=0){ByteBuffer input=codec.getInputBuffer(inputIndex);int size=extractor.readSampleData(input,0);if(size<0){codec.queueInputBuffer(inputIndex,0,0,0,MediaCodec.BUFFER_FLAG_END_OF_STREAM);inputEnded=true;}else{codec.queueInputBuffer(inputIndex,0,size,extractor.getSampleTime(),0);extractor.advance();}}}
                 int outputIndex=codec.dequeueOutputBuffer(info,10000);
                 if(outputIndex==MediaCodec.INFO_OUTPUT_FORMAT_CHANGED){MediaFormat decoded=codec.getOutputFormat();sourceRate=decoded.getInteger(MediaFormat.KEY_SAMPLE_RATE);channels=decoded.getInteger(MediaFormat.KEY_CHANNEL_COUNT);encoding=decoded.containsKey(MediaFormat.KEY_PCM_ENCODING)?decoded.getInteger(MediaFormat.KEY_PCM_ENCODING):AudioFormat.ENCODING_PCM_16BIT;}
                 if(outputIndex>=0){ByteBuffer decoded=codec.getOutputBuffer(outputIndex).order(ByteOrder.LITTLE_ENDIAN);decoded.position(info.offset);decoded.limit(info.offset+info.size);int sampleBytes=encoding==AudioFormat.ENCODING_PCM_FLOAT?4:2;
                     while(decoded.remaining()>=channels*sampleBytes){double mixed=0;for(int channel=0;channel<channels;channel++)mixed+=encoding==AudioFormat.ENCODING_PCM_FLOAT?decoded.getFloat()*32767:decoded.getShort();short sample=(short)Math.max(-32768,Math.min(32767,mixed/channels));
+                        if(nextTargetFrame>=endAt*targetRate){outputEnded=true;break;}
                         if(sourceFrame*targetRate>=nextTargetFrame*sourceRate){if(nextTargetFrame>=skip){pcm.write(sample&255);pcm.write((sample>>8)&255);}nextTargetFrame++;}sourceFrame++;
-                        if(pcm.size()>=length(offset)*targetRate*2){while(pending.size()>=keys.size()&&!events.stopped.get())completeSlice(pending.remove(),cues,file,events);
-                            Slice slice=new Slice();slice.offset=offset;slice.duration=pcm.size()/(double)(targetRate*2);slice.index=index++;slice.wav=wav(pcm.toByteArray(),targetRate);pcm.reset();offset+=slice.duration;
-                            final String key=keys.get(slice.index%keys.size());slice.result=workers.get(slice.index%keys.size()).submit(()->groq(slice.wav,key,events.stopped));pending.add(slice);
-                        }
+                        if(pcm.size()>=3200){pipeline.send(pcm.toByteArray());pcm.reset();}
                     }
-                    outputEnded=(info.flags&MediaCodec.BUFFER_FLAG_END_OF_STREAM)!=0;codec.releaseOutputBuffer(outputIndex,false);
+                    outputEnded=outputEnded||(info.flags&MediaCodec.BUFFER_FLAG_END_OF_STREAM)!=0;codec.releaseOutputBuffer(outputIndex,false);
                 }
             }
             if(events.stopped.get()||closed)return;
-            if(pcm.size()>0){while(pending.size()>=keys.size())completeSlice(pending.remove(),cues,file,events);Slice slice=new Slice();slice.offset=offset;slice.duration=pcm.size()/(double)(targetRate*2);slice.index=index++;slice.wav=wav(pcm.toByteArray(),targetRate);offset+=slice.duration;final String key=keys.get(slice.index%keys.size());slice.result=workers.get(slice.index%keys.size()).submit(()->groq(slice.wav,key,events.stopped));pending.add(slice);}
-            while(!pending.isEmpty())completeSlice(pending.remove(),cues,file,events);
-            if(cues.length()==0)throw new IOException("No speech recognized");
-            store(file,object("until",offset,"next_chunk",index,"cues",cues,"complete",true));events.send(object("status","done"));
-        } finally {for(Slice slice:pending)if(slice.result!=null)slice.result.cancel(true);for(ExecutorService worker:workers)worker.shutdownNow();if(codec!=null){try{codec.stop();}catch(Exception ignored){}codec.release();}extractor.release();}
+            if(pcm.size()>0)pipeline.send(pcm.toByteArray());
+            pipeline.finish();
+        } finally {pipeline.close();if(codec!=null){try{codec.stop();}catch(Exception ignored){}codec.release();}extractor.release();}
     }
 }

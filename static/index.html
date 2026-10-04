@@ -27,7 +27,10 @@
     --sub-font-size: 13.5px;
     --panel-header-height: 52px;
 }
-*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",Helvetica,Arial,sans-serif;}
+*{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",Helvetica,Arial,sans-serif;-webkit-tap-highlight-color:transparent;}
+/* Pointer presses stay clean; keyboard navigation keeps a themed focus cue. */
+:is(button,a,[role="button"],[tabindex],input[type="button"],input[type="submit"]):focus:not(:focus-visible){outline:none;}
+:is(button,a,[role="button"],[tabindex],input[type="button"],input[type="submit"]):focus-visible{outline:2px solid var(--purple-light);outline-offset:2px;}
 html,body{height:100%;overflow:hidden;}
 body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100vh;}
 
@@ -920,12 +923,49 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
     background: #141422; border: 1px solid rgba(168,85,247,.3);
     border-radius: 12px; padding: 14px 16px;
     width: 300px; max-width: calc(100vw - 24px);
+    box-sizing: border-box; max-height: calc(100dvh - 24px);
+    flex-direction: column; overflow-wrap: anywhere;
     box-shadow: 0 16px 48px rgba(0,0,0,.75);
     animation: popIn .15s ease;
 }
 @keyframes popIn{from{opacity:0;transform:scale(.95) translateY(-5px);}to{opacity:1;transform:scale(1) translateY(0);}}
 .dict-close { position: absolute; top: 7px; right: 7px; background: none; border: none; color: var(--text3); cursor: pointer; font-size: 12px; }
-.dict-word { font-size: 18px; font-weight: 700; color: var(--text); }
+#dictContent { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+body.android-runtime .web-only{display:none!important}
+.android-only{display:none!important}
+body.android-runtime .android-only{display:inline-flex!important}
+.transcript-share-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:34px;padding:0 14px;border:1px solid rgba(168,85,247,.3);border-radius:9px;background:rgba(168,85,247,.12);color:var(--purple-light);font-size:11px;cursor:pointer}
+.transcript-share-btn:hover:not(:disabled){background:rgba(168,85,247,.22)}
+.transcript-share-btn:disabled{opacity:.4;cursor:not-allowed}
+.mp-ctrl-row{flex-wrap:wrap}
+.mp-ctrl-row .mp-right{flex:1 0 100%;min-width:0;gap:12px;justify-content:space-between;margin-left:0}
+.mp-right .lp-loop-row{flex-shrink:0}
+.mp-right .lb{height:34px;min-height:34px;display:inline-flex;align-items:center;justify-content:center}
+.transcript-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0}
+.transcript-export-group{display:inline-flex;align-items:center;min-width:0;height:34px;border:1px solid var(--border);border-radius:9px;overflow:hidden;background:rgba(255,255,255,.025)}
+.transcript-export-label{padding-left:12px;font-size:11px;color:var(--text3);white-space:nowrap}
+.transcript-export-group select{height:32px;width:82px;padding:0 8px;background:transparent;color:var(--text2);border:0;font:inherit;font-size:11px;cursor:pointer;color-scheme:dark}
+.transcript-export-group button,.transcript-print-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:32px;padding:0 12px;font-size:11px;font-weight:500;white-space:nowrap;cursor:pointer}
+.transcript-export-group button{border:0;border-left:1px solid var(--border);background:rgba(168,85,247,.12);color:var(--purple-light)}
+.transcript-export-group button:hover{background:rgba(168,85,247,.22)}
+.transcript-export-group .transcript-format-button{width:82px;min-width:0;padding:0 10px;border:0;background:transparent;color:var(--text2);justify-content:space-between}
+.transcript-export-group .transcript-format-button:hover,.transcript-export-group .transcript-format-button[aria-expanded="true"]{color:var(--purple-light);background:rgba(168,85,247,.1)}
+.transcript-format-button i{font-size:9px;color:var(--text3)}
+.transcript-format-button:focus-visible{outline:2px solid var(--purple-light);outline-offset:-3px}
+#subtitleFormatMenu{position:fixed;z-index:400;width:184px;max-width:calc(100vw - 24px);padding:5px;background:var(--panel-right-bg,#141422);border:1px solid rgba(168,85,247,.3);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.45)}
+#subtitleFormatMenu[hidden]{display:none}
+#subtitleFormatMenu button{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;height:36px;padding:0 10px;border:0;border-radius:6px;background:transparent;color:var(--text2);font-size:12px;cursor:pointer;text-align:left}
+#subtitleFormatMenu button:hover,#subtitleFormatMenu button:focus-visible{background:var(--card-hover);color:var(--text);outline:none}
+#subtitleFormatMenu button[aria-checked="true"]{background:rgba(168,85,247,.14);color:var(--purple-light)}
+#subtitleFormatMenu .format-tick{visibility:hidden;font-size:11px}
+#subtitleFormatMenu [aria-checked="true"] .format-tick{visibility:visible}
+@media(max-width:600px){.transcript-export-group .transcript-format-button{width:58px;min-width:58px;padding:0 8px}}
+.transcript-print-btn{height:34px;border:1px solid var(--border);border-radius:9px;background:transparent;color:var(--text2)}
+.transcript-print-btn:hover{background:var(--card-hover);color:var(--text)}
+@media(max-width:1000px){.transcript-print-label{display:none}.transcript-export-label{display:none}.transcript-print-btn{width:34px;padding:0}}
+#transcriptPrintDialog button{color:#374151;background:#f3f4f6;border:1px solid #d1d5db;padding:7px 12px;font-size:12px}
+@media(max-width:600px){.mp-ctrl-row .mp-right{gap:6px}.transcript-actions{flex:1;gap:6px}.transcript-export-group{height:34px}.transcript-export-label{display:none}.transcript-export-group select{width:58px;min-width:0}.transcript-export-group button{padding:0 8px;min-width:88px}.transcript-print-btn{padding:0 8px;font-size:10px}.mp-right .lp-loop-row{gap:4px}}
+.dict-word { font-size: 18px; font-weight: 700; color: var(--text); padding-right: 24px; }
 .dict-phon { font-size: 11px; color: var(--purple-light); margin-bottom: 8px; }
 .dict-pos { font-size: 9.5px; color: var(--amber); font-weight: 700; text-transform: uppercase; }
 .dict-def { font-size: 12px; color: var(--text2); line-height: 1.5; margin-bottom: 4px; }
@@ -950,13 +990,13 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
 .settings-footer button{width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--card-bg);color:var(--text2);cursor:pointer;text-align:left}
 .settings-footer button:hover{background:var(--card-hover);color:var(--text)}
 .col-left.collapsed .settings-footer{display:none}
-#settingsDialog{margin:auto;width:min(440px,calc(100vw - 32px));padding:24px;border:1px solid var(--border);border-radius:14px;background:var(--panel-right-bg);color:var(--text)}
+#settingsDialog{margin:auto;width:min(440px,calc(100vw - 32px));max-height:85dvh;overflow-y:auto;padding:24px;border:1px solid var(--border);border-radius:14px;background:var(--panel-right-bg);color:var(--text)}
 #settingsDialog::backdrop{background:rgba(0,0,0,.65)}
 .settings-heading{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
 .settings-heading button{border:0;background:transparent;color:var(--text2);font-size:24px;cursor:pointer}
 .settings-note{font-size:12px;color:var(--text2);line-height:1.7;margin-bottom:16px}
 #settingsDialog label{display:block;font-size:13px;margin:14px 0 6px}
-#settingsDialog input{width:100%;background:var(--card-bg);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text);outline:none}
+#settingsDialog input,#settingsDialog select{width:100%;background:var(--card-bg);border:1px solid var(--border);border-radius:8px;padding:10px;color:var(--text);outline:none}
 #settingsDialog input:focus{border-color:var(--purple)}
 #settingsStatus{min-height:32px;font-size:12px;color:var(--text2);padding-top:12px}
 #saveSettingsBtn{width:100%;padding:10px;border:0;border-radius:8px;background:var(--grad);color:white;cursor:pointer}
@@ -1039,6 +1079,9 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
     .mp-speed-wrap{padding:2px 6px;gap:4px}
     .speed-slider{width:64px}
     .mp-right{margin-left:auto}
+    body.android-runtime .mp-right .lp-loop-row{flex:1;min-width:0;display:grid;grid-template-columns:minmax(30px,1fr) minmax(30px,1fr) minmax(64px,1.6fr) minmax(30px,1fr);gap:6px}
+    body.android-runtime .mp-right .transcript-actions{flex:0 0 auto}
+    body.android-runtime .mp-right .lb{width:100%}
     .lb{min-height:30px;min-width:30px;padding:4px 7px}
     .ai-hd{height:38px;padding:0 14px}
     .ai-hd-title{font-size:13px;flex-wrap:nowrap}
@@ -1053,7 +1096,7 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
 }
 @media(max-width:600px) and (max-height:600px){
     body{grid-template-rows:44px minmax(0,1fr) minmax(160px,1fr)}
-    .mid-player-console .mp-right{display:none}
+    .mid-player-console .lp-loop-row,body.android-runtime .mid-player-console .lp-loop-row{display:none}
     .ai-input-panel{padding-bottom:12px}
 }
 </style>
@@ -1120,9 +1163,12 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
 <dialog id="settingsDialog" aria-labelledby="settingsTitle" oncancel="closeSettings()">
     <form onsubmit="saveApiSettings(event)">
         <div class="settings-heading"><h3 id="settingsTitle">API Key 设置</h3><button type="button" onclick="closeSettings()" aria-label="关闭设置">×</button></div>
-        <p class="settings-note">密钥保存在本地服务的 .env 文件中。留空保留原配置。两个 Groq Key 按切片交替转写；新配置用于后续转写任务。</p>
-        <label for="groqKey1">Groq API Key 1</label><input id="groqKey1" type="password" autocomplete="new-password" spellcheck="false">
-        <label for="groqKey2">Groq API Key 2</label><input id="groqKey2" type="password" autocomplete="new-password" spellcheck="false">
+        <p class="settings-note">密钥保存在本地服务的 .env 文件中。留空保留原配置。两个 Key 按转写段交替使用；新配置用于后续转写任务。</p>
+        <label for="subtitleProvider">字幕转写服务</label><select id="subtitleProvider"><option value="aliyun">阿里云 Streaming</option></select>
+        <label for="aliyunRegion">阿里云地域</label><select id="aliyunRegion"><option value="beijing">中国内地 · 北京</option><option value="singapore">国际站 · 新加坡</option></select>
+        <label for="dictionaryProvider">查词模型</label><select id="dictionaryProvider"><option value="auto">自动：开启代理用 Gemini，关闭用 Qwen</option><option value="qwen">阿里云 Qwen</option><option value="gemini">Gemini</option></select>
+        <label for="aliyunKey1">阿里云百炼 API Key 1</label><input id="aliyunKey1" type="password" autocomplete="new-password" spellcheck="false">
+        <label for="aliyunKey2">阿里云百炼 API Key 2</label><input id="aliyunKey2" type="password" autocomplete="new-password" spellcheck="false">
         <label for="geminiKey">Gemini API Key（AI 聊天）</label><input id="geminiKey" type="password" autocomplete="new-password" spellcheck="false">
         <p id="settingsStatus" role="status" aria-live="polite"></p>
         <button id="saveSettingsBtn" type="submit">保存设置</button>
@@ -1206,6 +1252,15 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
                     <button class="lb" id="btnLoop" onclick="toggleLoop()"><i class="fa-solid fa-repeat"></i> Loop</button>
                     <button class="lb danger" onclick="clearLoop()" title="清除 Loop"><i class="fa-solid fa-xmark"></i></button>
                 </div>
+        <div class="transcript-actions">
+            <button id="subtitleShareBtn" class="transcript-share-btn android-only" disabled title="请等待整集字幕生成完成" onclick="shareSubtitleTranscript()"><i class="fa-solid fa-share-nodes" aria-hidden="true"></i>分享字幕</button>
+            <div class="transcript-export-group web-only"><span class="transcript-export-label">字幕</span>
+                <input id="subtitleExportFormat" type="hidden" value="srt">
+                <button id="subtitleFormatButton" class="transcript-format-button" type="button" aria-label="字幕导出格式" aria-haspopup="menu" aria-controls="subtitleFormatMenu" aria-expanded="false" onclick="toggleSubtitleFormatMenu()" onkeydown="if(event.key==='ArrowDown'){event.preventDefault();event.stopPropagation();toggleSubtitleFormatMenu(true)}"><span id="subtitleFormatLabel">SRT</span><i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button>
+                <button onclick="exportSubtitles()"><i class="fa-solid fa-file-arrow-down" aria-hidden="true"></i>导出字幕</button>
+            </div>
+            <button class="transcript-print-btn web-only" onclick="previewTranscriptPrint()" aria-label="打印预览" title="打印预览"><i class="fa-solid fa-print" aria-hidden="true"></i><span class="transcript-print-label">打印预览</span></button>
+        </div>
             </div>
         </div>
 
@@ -1240,8 +1295,8 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
 
         <!-- Chat messages area -->
         <div class="ai-messages" id="aiMessages">
-            <div class="ai-welcome-card">
-                <button class="welcome-close" onclick="this.parentElement.remove()" aria-label="关闭提示" title="关闭提示">×</button>
+            <div class="ai-welcome-card" id="aiWelcomeCard">
+                <button class="welcome-close" onclick="dismissAiWelcome()" aria-label="关闭提示" title="关闭提示">×</button>
                 <h4><i class="fa-solid fa-lightbulb" style="color:var(--amber)"></i> 智能字幕助学</h4>
                 在左侧字幕列表勾选任意句子，它们会自动被送入下方的提问框。<br>
                 你可以让大模型为你深度剖析<strong>长难句语法</strong>、<strong>地道习语</strong>或<strong>结合全集背景回答问题</strong>。
@@ -1276,6 +1331,15 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
     <div id="dictContent"></div>
 </div>
 
+<dialog id="transcriptPrintDialog" style="margin:auto;width:min(960px,94vw);height:88dvh;padding:16px;background:white;color:#222;border:0;border-radius:12px">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap"><strong style="flex:1">字幕打印预览 <small id="transcriptPrintStatus" style="font-size:11px;font-weight:normal"></small></strong><button class="lb" onclick="refreshTranscriptPrintPreview()">更新预览</button><button class="lb" onclick="printTranscriptDocument()">打印 / 保存 PDF</button><button class="lb" onclick="document.getElementById('transcriptPrintDialog').close()">关闭</button></div>
+    <iframe id="transcriptPrintFrame" title="字幕打印排版" style="width:100%;height:calc(100% - 44px);border:1px solid #ddd;background:white"></iframe>
+</dialog>
+<div id="subtitleFormatMenu" role="menu" aria-label="字幕导出格式" hidden>
+    <button role="menuitemradio" aria-checked="true" data-format="srt" onclick="selectSubtitleFormat('srt')">SRT 字幕<i class="fa-solid fa-check format-tick" aria-hidden="true"></i></button>
+    <button role="menuitemradio" aria-checked="false" data-format="vtt" onclick="selectSubtitleFormat('vtt')">VTT 字幕<i class="fa-solid fa-check format-tick" aria-hidden="true"></i></button>
+    <button role="menuitemradio" aria-checked="false" data-format="txt" onclick="selectSubtitleFormat('txt')">TXT 文稿<i class="fa-solid fa-check format-tick" aria-hidden="true"></i></button>
+</div>
 <!-- Audio Element -->
 <audio id="ga"></audio>
 
@@ -1295,10 +1359,63 @@ let nowPlaying = null;       // { url, title, author, cover, transcriptUrl, desc
 let cues = [];               // { start, end, text }[]
 let activeCue = -1;
 let isTranscribing = false;
+let transcriptionJobId = null;
+const sentenceJobs = new Map();
+let transcriptionJobSequence = 0;
+let totalTranscriptionRetries = 0;
+function newTranscriptionJobId() {
+    return window.crypto?.randomUUID?.() || `${Date.now()}-${++transcriptionJobSequence}-${Math.random().toString(36).slice(2)}`;
+}
+function cancelTranscriptionJob(id) {
+    if (!id) return;
+    fetch('/api/cancel_transcription', {method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({request_id:id}),keepalive:true}).catch(()=>{});
+}
+function stopTranscriptionJobs() {
+    cancelTranscriptionJob(transcriptionJobId);
+    transcriptionJobId = null;
+    for (const [id, controller] of sentenceJobs) {cancelTranscriptionJob(id);controller?.abort();}
+    sentenceJobs.clear();
+}
 let subtitleStream = null;
 let subtitleRequest = 0;
 let coveredUntil = 0;
 let subtitlesComplete = false;
+const sentenceRetries = new Set();
+let androidRestorePosition = null;
+let androidStateSavedAt = 0;
+
+function saveAndroidPlaybackState() {
+    if (!window.androidNativeRuntime || !nowPlaying) return;
+    try {
+        localStorage.setItem('android_playback_state', JSON.stringify({episode:nowPlaying,
+            position:androidRestorePosition ?? audio.currentTime, playing:wantsPlayback,
+            speed, volume:lastVolume}));
+    } catch (_) {}
+}
+function restoreAndroidPlaybackState() {
+    if (nowPlaying) return;
+    try {
+        const state = JSON.parse(localStorage.getItem('android_playback_state') || 'null');
+        if (!state || !state.episode || !/^https?:\/\//.test(state.episode.url)) return;
+        const ep = state.episode;
+        startPlay(ep.url,ep.title || '',ep.author || '',ep.cover || '',ep.transcriptUrl || '',ep.description || '');
+        wantsPlayback = state.playing === true;
+        speed = Number.isFinite(state.speed) ? Math.max(.25,Math.min(1,state.speed)) : 1;
+        lastVolume = Number.isFinite(state.volume) ? Math.max(0,Math.min(1,state.volume)) : 1;
+        audio.volume = lastVolume; setSpeed(speed);
+        androidRestorePosition = Number.isFinite(state.position) ? Math.max(0,state.position) : 0;
+        audio.currentTime = androidRestorePosition;
+        saveAndroidPlaybackState();
+    } catch (_) {}
+}
+
+function resumeAndroidPlayback() {
+    if (!nowPlaying) { restoreAndroidPlaybackState(); return; }
+    // Re-open SSE from its durable checkpoint after background WebView suspension.
+    if (!subtitlesComplete) triggerAiTranscribe(true,true);
+    else playWhenReady();
+}
 let wantsPlayback = false;
 let waitingForSubtitles = false;
 let subtitleRetryTimer = null;
@@ -1392,6 +1509,7 @@ async function loadTopCharts(c = 'us') {
     try {
         const res = await fetch(`/api/top-charts?country=${c}&limit=30`);
         const data = await res.json();
+        if (!res.ok || !Array.isArray(data.results)) throw new Error(data.detail || data.message || '播客榜单加载失败');
         renderTopCharts(data.results);
     } catch(e) {
         setPlaza(`<div style="padding:24px;text-align:center;color:var(--text3);font-size:12px">加载失败: ${e.message}</div>`);
@@ -1433,6 +1551,7 @@ async function doSearch() {
     try {
         const res = await fetch(`/api/search?query=${enc(q)}&country=${country}`);
         const data = await res.json();
+        if (!res.ok || !Array.isArray(data.results)) throw new Error(data.detail || data.message || '搜索失败');
         renderSearchResults(data.results);
     } catch(e) {
         setPlaza(`<div style="padding:24px;text-align:center;color:var(--text3);font-size:12px">搜索失败: ${e.message}</div>`);
@@ -1468,6 +1587,7 @@ async function loadPodcast(id) {
     try {
         const res = await fetch(`/api/lookup?id=${id}&country=${country}`);
         const data = await res.json();
+        if (!res.ok || (!data.feedData && !data.feed)) throw new Error(data.detail || data.message || '播客详情加载失败');
         currentMeta = data.meta || data;
         const feed = data.feedData || data.feed || {};
         renderChannel(feed, currentMeta);
@@ -1563,6 +1683,9 @@ function playByIdx(idx, cover, author) {
 }
 
 function startPlay(url, title, author, cover, transcriptUrl, description) {
+    stopTranscriptionJobs();
+    totalTranscriptionRetries = 0;
+    androidRestorePosition = null;
     if (window.matchMedia && window.matchMedia('(max-width:600px)').matches) collapseSidebar();
     clearSubtitleRecovery();
     reconnectAttempts = 0;
@@ -1611,7 +1734,7 @@ function startPlay(url, title, author, cover, transcriptUrl, description) {
 }
 
 function canPlayWithSubtitles() {
-    return cues.length > 0 && (subtitlesComplete || audio.currentTime < coveredUntil);
+    return cues.length > 0 && (subtitlesComplete || (androidRestorePosition ?? audio.currentTime) < coveredUntil);
 }
 
 async function playWhenReady() {
@@ -1622,6 +1745,7 @@ async function playWhenReady() {
         return;
     }
     waitingForSubtitles = false;
+    if (androidRestorePosition !== null) audio.currentTime = androidRestorePosition;
     audio.playbackRate = speed;
     if (!audio.paused) return;
     const request = subtitleRequest;
@@ -1665,6 +1789,8 @@ function seekAudio(e) {
 }
 
 audio.ontimeupdate = () => {
+    if (androidRestorePosition !== null && audio.currentTime >= androidRestorePosition - .1) androidRestorePosition = null;
+    if (Date.now() - androidStateSavedAt > 2000) { saveAndroidPlaybackState(); androidStateSavedAt = Date.now(); }
     if (!audio.duration) return;
     const pct = (audio.currentTime / audio.duration) * 100;
     const fill = document.getElementById('progFill');
@@ -1683,6 +1809,13 @@ audio.ontimeupdate = () => {
     // A-B loop enforcement
     if (loopOn && loopA !== null && loopB !== null && audio.currentTime >= loopB) {
         audio.currentTime = loopA;
+    }
+};
+
+audio.onloadedmetadata = () => {
+    if (androidRestorePosition !== null) {
+        audio.currentTime = Math.min(androidRestorePosition,Number.isFinite(audio.duration) ? audio.duration : androidRestorePosition);
+        androidRestorePosition = null;
     }
 };
 audio.onended = () => setPlayIcon(false);
@@ -1808,11 +1941,15 @@ function clearSubtitleRecovery() {
 
 function triggerAiTranscribe(auto = false, resume = false) {
     if (!nowPlaying) return;
+    stopTranscriptionJobs();
+    if (!auto) totalTranscriptionRetries = 0;
     clearSubtitleRecovery();
     if (!resume || !auto) reconnectAttempts = 0;
     if (subtitleStream) subtitleStream.close();
     const request = ++subtitleRequest;
     const episode = nowPlaying;
+    const jobId = newTranscriptionJobId();
+    transcriptionJobId = jobId;
     isTranscribing = true;
     subtitlesComplete = false;
     updateAiAvailability();
@@ -1834,12 +1971,14 @@ function triggerAiTranscribe(auto = false, resume = false) {
         clearSubtitleRecovery();
         if (subtitleStream) subtitleStream.close();
         subtitleStream = null;
+        if (transcriptionJobId === jobId) transcriptionJobId = null;
         isTranscribing = false;
         if (btn) btn.innerHTML = '<i class="fa-solid fa-rotate"></i> ' + (subtitlesComplete ? '刷新' : '重连 / 继续');
         updateAiAvailability();
     };
     const fail = (detail, retryable = true) => {
         if (request !== subtitleRequest) return;
+        cancelTranscriptionJob(jobId);
         finish();
         setBadge('转写失败', 'rgba(245,158,11,.15)', '#fbbf24', 'rgba(245,158,11,.3)');
         toast(detail, 'info');
@@ -1847,17 +1986,20 @@ function triggerAiTranscribe(auto = false, resume = false) {
             subScr.textContent = detail;
             audio.pause();
         }
-        if (retryable && reconnectAttempts < 5) {
+        if (retryable && reconnectAttempts < 5 && totalTranscriptionRetries < 20) {
+            totalTranscriptionRetries++;
             const attempt = ++reconnectAttempts;
             const delay = Math.min(15000, 1000 * 2 ** (attempt - 1));
             setBadge(`连接中断，${delay / 1000} 秒后从断点重连 (${attempt}/5)`, 'rgba(245,158,11,.15)', '#fbbf24', 'rgba(245,158,11,.3)');
             subtitleRetryTimer = setTimeout(() => {
                 if (request === subtitleRequest && nowPlaying === episode) triggerAiTranscribe(true, true);
             }, delay);
+        } else if (retryable) {
+            setBadge('已停止自动重试，请点击重连 / 继续', 'rgba(245,158,11,.15)', '#fbbf24', 'rgba(245,158,11,.3)');
         }
     };
     try {
-        const url = `/api/transcribe_stream?audio_url=${enc(episode.url)}&title=${enc(episode.title)}&transcript_url=${enc(episode.transcriptUrl)}&force_refresh=${!auto && !resume}`;
+        const url = `/api/transcribe_stream?audio_url=${enc(episode.url)}&title=${enc(episode.title)}&transcript_url=${enc(episode.transcriptUrl)}&force_refresh=${!auto && !resume}&request_id=${enc(jobId)}`;
         const stream = new EventSource(url);
         subtitleStream = stream;
         let lastActivity = Date.now();
@@ -1889,7 +2031,7 @@ function triggerAiTranscribe(auto = false, resume = false) {
                 coveredUntil = Infinity;
                 if (data.local_audio && audio.currentTime === 0) audio.src = data.local_audio;
                 renderSubs();
-                setBadge(data.status === 'official' ? '✅ 官方字幕' : '✅ Groq 字幕就绪', 'rgba(168,85,247,.15)', '#c084fc', 'rgba(168,85,247,.3)');
+                setBadge(data.status === 'official' ? '✅ 官方字幕' : '✅ 字幕就绪', 'rgba(168,85,247,.15)', '#c084fc', 'rgba(168,85,247,.3)');
                 finish();
                 playWhenReady();
             } else if (data.status === 'audio_source') {
@@ -1917,9 +2059,13 @@ function triggerAiTranscribe(auto = false, resume = false) {
                 if (!cues.length) { fail('未识别到有效字幕'); return; }
                 subtitlesComplete = true;
                 coveredUntil = Infinity;
+                renderSubs(); activeCue = -1; syncSubs(audio.currentTime);
                 finish();
                 setBadge('✅ 全篇转写完成', 'rgba(168,85,247,.15)', '#c084fc', 'rgba(168,85,247,.3)');
                 playWhenReady();
+            } else if (data.status === 'finishing') {
+                setBadge('音频上传完成，正在收尾…', 'rgba(168,85,247,.15)', '#c084fc', 'rgba(168,85,247,.3)');
+                if (btn) btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 收尾中…';
             } else if (data.status === 'error') {
                 fail(data.detail || '字幕转写失败', data.retryable !== false);
             }
@@ -1960,6 +2106,10 @@ function renderSubs() {
             <input type="checkbox" class="cue-check" data-idx="${i}" ${isChecked ? 'checked' : ''} onclick="event.stopPropagation()" onchange="onCueCheckChange(${i}, this.checked)" title="勾选送入 AI 提问框">
             <span class="sub-ts">${ft(c.start)}</span>
             <span class="sub-txt">${wordSpans(c.text, i)}</span>
+            <button class="save-btn" style="opacity:1" ${sentenceRetries.has(`${subtitleRequest}:${i}`) ? 'disabled' : ''}
+                onclick="regenerateSentence(event,${i})" title="重新识别这一句" aria-label="重新识别这一句">
+                <i class="fa-solid ${sentenceRetries.has(`${subtitleRequest}:${i}`) ? 'fa-spinner fa-spin' : 'fa-rotate'}"></i>
+            </button>
             <button class="save-btn ${saved ? 'saved' : ''}" id="sbtn-${i}"
                 onclick="saveSentence(event,${i})" title="${saved ? '已收藏' : '收藏到笔记本'}">
                 <i class="fa-${saved ? 'solid' : 'regular'} fa-bookmark"></i>
@@ -1967,6 +2117,38 @@ function renderSubs() {
         </div>`;
     });
     el.innerHTML = h;
+}
+
+async function regenerateSentence(event, idx) {
+    event.stopPropagation();
+    const cue = cues[idx];
+    const retryId = `${subtitleRequest}:${idx}`;
+    if (!cue || sentenceRetries.has(retryId)) return;
+    const request = subtitleRequest, url = nowPlaying.url;
+    const jobId = newTranscriptionJobId();
+    const controller = typeof AbortController === 'undefined' ? null : new AbortController();
+    sentenceJobs.set(jobId, controller);
+    sentenceRetries.add(retryId); renderSubs();
+    try {
+        const response = await fetch('/api/retranscribe_sentence', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            signal:controller?.signal,
+            body:JSON.stringify({audio_url:url, start:cue.source_start ?? cue.start, end:cue.source_end ?? cue.end, request_id:jobId})
+        });
+        const data = await response.json();
+        if (request !== subtitleRequest || nowPlaying.url !== url) return;
+        if (data.status !== 'success' || !data.cue) throw new Error(data.detail || data.message || '单句重新识别失败');
+        // Other sentences, playback position and pause state remain untouched.
+        cues[idx] = data.cue; activeCue = -1;
+        renderSubs(); syncSubs(audio.currentTime); updateCueSelectionUI();
+        toast('这一句已重新识别');
+    } catch (error) {
+        if (request === subtitleRequest && nowPlaying.url === url) toast(error.message || '单句重新识别失败，原字幕已保留');
+    } finally {
+        sentenceJobs.delete(jobId);
+        sentenceRetries.delete(retryId);
+        if (request === subtitleRequest && nowPlaying.url === url) { renderSubs(); activeCue = -1; syncSubs(audio.currentTime); }
+    }
 }
 
 function wordSpans(text, cueIdx) {
@@ -2070,6 +2252,11 @@ function handleAiKey(e) {
 
 function updateAiAvailability() {
     const ready = !!nowPlaying && subtitlesComplete && cues.length > 0;
+    const shareBtn = document.getElementById('subtitleShareBtn');
+    if (shareBtn) {
+        shareBtn.disabled = !ready;
+        shareBtn.title = ready ? '分享整集字幕 TXT 文件' : '请等待整集字幕生成完成';
+    }
     const btn = document.getElementById('aiSendBtn');
     if (btn) {
         btn.disabled = !ready || aiSending;
@@ -2197,18 +2384,154 @@ function formatMarkdown(str) {
 // ══════════════════════════════════════════════
 //  DICTIONARY & LOOKUP
 // ══════════════════════════════════════════════
+function subtitleTimestamp(seconds, separator = '.') {
+    const ms = Math.max(0,Math.round(seconds * 1000));
+    const pad = (value,size=2) => String(value).padStart(size,'0');
+    return `${pad(Math.floor(ms/3600000))}:${pad(Math.floor(ms/60000)%60)}:${pad(Math.floor(ms/1000)%60)}${separator}${pad(ms%1000,3)}`;
+}
+function closeSubtitleFormatMenu() {
+    document.getElementById('subtitleFormatMenu').hidden = true;
+    document.getElementById('subtitleFormatButton').setAttribute('aria-expanded','false');
+}
+function toggleSubtitleFormatMenu(keyboard = false) {
+    const menu = document.getElementById('subtitleFormatMenu');
+    if (!menu.hidden && !keyboard) {closeSubtitleFormatMenu();return;}
+    menu.hidden = false;
+    const button = document.getElementById('subtitleFormatButton');
+    button.setAttribute('aria-expanded','true');
+    const rect = button.getBoundingClientRect(), viewport = window.visualViewport;
+    const left=viewport?.offsetLeft||0,top=viewport?.offsetTop||0,width=viewport?.width||innerWidth,height=viewport?.height||innerHeight;
+    menu.style.left = `${Math.max(left+12,Math.min(rect.left,left+width-menu.offsetWidth-12))}px`;
+    menu.style.top = `${Math.max(top+12,Math.min(rect.top-menu.offsetHeight-8,top+height-menu.offsetHeight-12))}px`;
+    if(keyboard)menu.querySelector('[aria-checked="true"]').focus();
+}
+function selectSubtitleFormat(format) {
+    if(!['srt','vtt','txt'].includes(format))return;
+    document.getElementById('subtitleExportFormat').value = format;
+    document.getElementById('subtitleFormatLabel').textContent = format.toUpperCase();
+    document.querySelectorAll('#subtitleFormatMenu button').forEach(button=>button.setAttribute('aria-checked',String(button.dataset.format===format)));
+    closeSubtitleFormatMenu();
+    document.getElementById('subtitleFormatButton').focus();
+}
+document.addEventListener('click',event=>{
+    if(!event.target.closest('#subtitleFormatButton,#subtitleFormatMenu'))closeSubtitleFormatMenu();
+});
+document.addEventListener('keydown',event=>{
+    const menu=document.getElementById('subtitleFormatMenu');if(menu.hidden)return;
+    if(event.key==='Escape'){closeSubtitleFormatMenu();document.getElementById('subtitleFormatButton').focus();}
+    if(event.key==='ArrowDown'||event.key==='ArrowUp'){
+        event.preventDefault();const buttons=Array.from(menu.querySelectorAll('button'));
+        const index=buttons.indexOf(document.activeElement),step=event.key==='ArrowDown'?1:-1;
+        buttons[(index+step+buttons.length)%buttons.length].focus();
+    }
+});
+if(window.addEventListener)window.addEventListener('resize',closeSubtitleFormatMenu);
+function transcriptSnapshot() {
+    if (!nowPlaying || !cues.length) { toast('请先加载字幕。','info'); return null; }
+    const valid = cues.filter(c => Number.isFinite(c.start) && Number.isFinite(c.end) && c.end>c.start && typeof c.text==='string');
+    if (!valid.length) { toast('暂无可导出的字幕。','info'); return null; }
+    return {episode:{...nowPlaying},cues:valid.map(c=>({...c})),complete:subtitlesComplete,
+        duration:Number.isFinite(audio.duration)?audio.duration:null,date:new Date().toLocaleString()};
+}
+function transcriptExportText(snapshot,format) {
+    if (format === 'txt') return `${snapshot.episode.title}\n${snapshot.episode.author || ''}\n${snapshot.complete?'完整字幕':'部分字幕（仅已生成内容）'}\n\n`
+        + snapshot.cues.map(c=>`[${subtitleTimestamp(c.start)}] ${c.text}`).join('\n\n');
+    const separator = format === 'srt' ? ',' : '.';
+    return (format === 'vtt' ? 'WEBVTT\n\n' : '') + snapshot.cues.map((c,i)=>
+        `${i+1}\n${subtitleTimestamp(c.start,separator)} --> ${subtitleTimestamp(c.end,separator)}\n${c.text}\n`).join('\n');
+}
+function exportSubtitles() {
+    const snapshot = transcriptSnapshot(); if (!snapshot) return;
+    if (window.PodcastAndroid) {shareSubtitleTranscript(snapshot);return;}
+    const format = document.getElementById('subtitleExportFormat').value;
+    if (!['srt','vtt','txt'].includes(format)) return;
+    const name = (snapshot.episode.title || '播客字幕').replace(/[\\/:*?"<>|\x00-\x1f]/g,'_').slice(0,100)
+        + (snapshot.complete?'':'-部分字幕') + '.' + format;
+    const text = transcriptExportText(snapshot,format);
+    const url = URL.createObjectURL(new Blob([text],{type:'text/plain;charset=utf-8'}));
+    const link = document.createElement('a');link.href=url;link.download=name;link.click();
+    setTimeout(()=>URL.revokeObjectURL(url),10000);
+}
+function shareSubtitleTranscript(snapshot = transcriptSnapshot()) {
+    if (!snapshot || !window.PodcastAndroid) return;
+    if (!subtitlesComplete || !snapshot.complete) {
+        toast('请等待整集字幕生成完成后再分享。','info');
+        return;
+    }
+    const title=snapshot.episode.title || '播客字幕';
+    window.PodcastAndroid.shareSubtitle(title,transcriptExportText(snapshot,'txt'));
+}
+function buildPrintableTranscript(snapshot) {
+    const ep = snapshot.episode;
+    const description = (ep.description || '').replace(/<[^>]*>/g,'');
+    return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>${esc(ep.title || '播客字幕')}</title><style>
+        @page{size:A4;margin:16mm}*{box-sizing:border-box}body{color:#222;background:white;font:11pt/1.65 Arial,"Microsoft YaHei",sans-serif;margin:24px auto;max-width:760px;padding:0 20px}
+        h1{font-size:20pt;line-height:1.35;margin:0 0 12px;overflow-wrap:anywhere}.meta{font-size:9pt;color:#555;border-bottom:1px solid #ccc;padding-bottom:12px;margin-bottom:18px;overflow-wrap:anywhere}
+        .description{white-space:pre-wrap;font-size:10pt;margin-bottom:20px}.cue{position:relative;padding-left:106px;margin-bottom:10px;break-inside:auto;page-break-inside:auto}.time{position:absolute;left:0;top:0;width:92px;color:#666;font-size:9pt;font-variant-numeric:tabular-nums}.text{min-width:0;white-space:pre-wrap;overflow-wrap:anywhere;orphans:3;widows:3}
+        @media print{html,body{height:auto!important;overflow:visible!important;width:auto!important}body{margin:0;padding:0;max-width:none}h1{break-after:avoid}}
+        </style></head><body><h1>${esc(ep.title || '播客字幕')}</h1><div class="meta">播客 / 作者：${esc(ep.author || '未提供')}<br>整理时间：${esc(snapshot.date)}<br>状态：${snapshot.complete?'完整字幕':'部分字幕，仅包含当前已生成内容'} · ${snapshot.cues.length} 条${snapshot.duration?` · 时长 ${subtitleTimestamp(snapshot.duration).slice(0,8)}`:''}<br>音频来源：${esc(ep.url || '')}</div>
+        ${description?`<div class="description">${esc(description)}</div>`:''}
+        ${snapshot.cues.map(c=>`<div class="cue"><span class="time">${subtitleTimestamp(c.start).slice(0,8)}</span><div class="text">${esc(c.text)}</div></div>`).join('')}</body></html>`;
+}
+function refreshTranscriptPrintPreview() {
+    const snapshot = transcriptSnapshot();if (!snapshot) return;
+    document.getElementById('transcriptPrintFrame').srcdoc = buildPrintableTranscript(snapshot);
+    document.getElementById('transcriptPrintStatus').textContent = snapshot.complete ? `完整字幕 · ${snapshot.cues.length} 条` : `已生成 ${snapshot.cues.length} 条 · 仍在转写，尚非全文`;
+    return snapshot;
+}
+function previewTranscriptPrint() {
+    if (!refreshTranscriptPrintPreview()) return;
+    document.getElementById('transcriptPrintDialog').showModal();
+}
+function printTranscriptDocument() {
+    // Recollect ALL current cues at click time, including newly generated or
+    // corrected subtitles since the preview was opened. Print a top-level
+    // document so the preview iframe's height cannot clip later pages.
+    const snapshot = refreshTranscriptPrintPreview();if (!snapshot) return;
+    const printWindow = window.open('','_blank');
+    if (!printWindow) {toast('打印窗口被浏览器拦截，请允许本站打开打印窗口。','info');return;}
+    printWindow.opener = null;
+    printWindow.document.open();
+    printWindow.document.write(buildPrintableTranscript(snapshot));
+    printWindow.document.close();
+    const ready = printWindow.document.fonts?.ready || Promise.resolve();
+    ready.then(()=>{if (!printWindow.closed){printWindow.focus();printWindow.print();}});
+}
+let dictionaryAnchor = {x:12,y:12};
+let dictionaryLookup = 0;
+function positionDictPopup() {
+    const popup = document.getElementById('dictPopup');
+    if (!popup || popup.style.display === 'none') return;
+    const viewport = window.visualViewport;
+    const left = viewport?.offsetLeft || 0, top = viewport?.offsetTop || 0;
+    const width = viewport?.width || window.innerWidth;
+    const height = viewport?.height || window.innerHeight;
+    const margin = Math.min(12, width / 4, height / 4);
+    popup.style.maxWidth = `${Math.max(1,width - margin * 2)}px`;
+    popup.style.maxHeight = `${Math.max(1,height - margin * 2)}px`;
+    const rect = popup.getBoundingClientRect();
+    const clamp = (value, min, max) => Math.max(min, Math.min(value,max));
+    let y = dictionaryAnchor.y + 15;
+    if (y + rect.height > top + height - margin) y = dictionaryAnchor.y - rect.height - 15;
+    popup.style.left = `${clamp(dictionaryAnchor.x - 100,left + margin,left + width - rect.width - margin)}px`;
+    popup.style.top = `${clamp(y,top + margin,top + height - rect.height - margin)}px`;
+}
+if (window.addEventListener) window.addEventListener('resize',positionDictPopup);
+if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize',positionDictPopup);
+    window.visualViewport.addEventListener('scroll',positionDictPopup);
+}
 async function lookupWord(word, e, cueIdx) {
     e.stopPropagation();
+    const request = ++dictionaryLookup;
     const popup = document.getElementById('dictPopup');
     const content = document.getElementById('dictContent');
-    popup.style.display = 'block';
-    
-    const x = Math.min(window.innerWidth - 320, Math.max(10, e.clientX - 100));
-    const y = Math.min(window.innerHeight - 280, Math.max(10, e.clientY + 15));
-    popup.style.left = `${x}px`;
-    popup.style.top = `${y}px`;
+    popup.style.display = 'flex';
+    dictionaryAnchor = {x:e.clientX,y:e.clientY};
 
     content.innerHTML = `<div class="dict-loading"><i class="fa-solid fa-spinner fa-spin"></i> 查询中...</div>`;
+    content.scrollTop = 0;
+    positionDictPopup();
 
     let context = '';
     if (cueIdx !== undefined && cues[cueIdx]) context = cues[cueIdx].text;
@@ -2216,6 +2539,7 @@ async function lookupWord(word, e, cueIdx) {
     try {
         const res = await fetch(`/api/define?word=${enc(word)}&context=${enc(context)}`);
         const result = await res.json();
+        if (request !== dictionaryLookup) return;
         if (result.status === 'success' && result.data) {
             const d = result.data;
             content.innerHTML = `
@@ -2231,11 +2555,13 @@ async function lookupWord(word, e, cueIdx) {
             content.innerHTML = `<div class="dict-none">暂未查到该词: ${esc(result.message || '未知错误')}</div>`;
         }
     } catch(err) {
+        if (request !== dictionaryLookup) return;
         content.innerHTML = `<div class="dict-none">查询失败: ${esc(err.message)}</div>`;
-    }
+    } finally { if (request === dictionaryLookup) positionDictPopup(); }
 }
 
 function closeDictPopup() {
+    dictionaryLookup++;
     document.getElementById('dictPopup').style.display = 'none';
 }
 
@@ -2413,7 +2739,12 @@ function toast(msg, type = 'info') {
 // ══════════════════════════════════════════════
 //  INIT
 // ══════════════════════════════════════════════
-const apiKeyInputs = {groq_key_1:'groqKey1',groq_key_2:'groqKey2',gemini_key:'geminiKey'};
+const apiKeyInputs = {gemini_key:'geminiKey',aliyun_key_1:'aliyunKey1',aliyun_key_2:'aliyunKey2'};
+function applyProviderSettings(options = {}) {
+    document.getElementById('subtitleProvider').value = 'aliyun';
+    document.getElementById('aliyunRegion').value = options.aliyun_region || 'beijing';
+    document.getElementById('dictionaryProvider').value = options.dictionary_provider || 'auto';
+}
 function alignBottomPanels() {
     const panels = [document.querySelector('.mid-player-console'),document.querySelector('.ai-input-panel')];
     const naturalHeight = panel => {
@@ -2472,6 +2803,7 @@ async function openSettings() {
         const data = await response.json();
         if (!dialog.open) return;
         applyKeyStatus(data.configured);
+        applyProviderSettings(data.options);
         document.getElementById('settingsStatus').textContent = '';
     } catch {
         document.getElementById('settingsStatus').textContent = '读取失败，请关闭后重试。';
@@ -2489,6 +2821,9 @@ async function saveApiSettings(event) {
     if (button.disabled) return;
     button.disabled = true;
     const body = Object.fromEntries(Object.entries(apiKeyInputs).map(([field,id]) => [field,document.getElementById(id).value.trim()]));
+    body.subtitle_provider = document.getElementById('subtitleProvider').value;
+    body.aliyun_region = document.getElementById('aliyunRegion').value;
+    body.dictionary_provider = document.getElementById('dictionaryProvider').value;
     try {
         const response = await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
         if (!response.ok) throw new Error();
@@ -2498,6 +2833,20 @@ async function saveApiSettings(event) {
         document.getElementById('settingsStatus').textContent = '保存失败，请重试。';
     } finally { button.disabled = false; }
 }
+function dismissAiWelcome() {
+    try { localStorage.setItem('ai_welcome_dismissed','1'); } catch (_) {}
+    const card = document.getElementById('aiWelcomeCard');
+    if (card) card.style.display = 'none';
+}
+
+// Apply before the first page paint, including subsequent app launches.
+try {
+    if (localStorage.getItem('ai_welcome_dismissed') === '1') {
+        const card = document.getElementById('aiWelcomeCard');
+        if (card) card.style.display = 'none';
+    }
+} catch (_) {}
+
 window.onload = () => {
     alignBottomPanels();
     loadNotebook();

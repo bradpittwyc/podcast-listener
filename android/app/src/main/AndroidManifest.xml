@@ -1,6 +1,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
-    <application android:label="播客学伴" android:icon="@drawable/ic_podcast" android:allowBackup="false" android:usesCleartextTraffic="true" android:theme="@android:style/Theme.Material.NoActionBar">
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <application android:label="播客学伴" android:icon="@drawable/ic_podcast" android:allowBackup="false" android:usesCleartextTraffic="true" android:theme="@style/AppTheme">
+        <service android:name=".BackendService" android:exported="false" android:stopWithTask="false" android:foregroundServiceType="mediaPlayback" />
+        <provider android:name=".SubtitleFileProvider" android:authorities="${applicationId}.subtitles" android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/subtitle_share_paths" />
+        </provider>
         <activity android:name=".MainActivity" android:exported="true" android:configChanges="orientation|screenSize|keyboardHidden" android:windowSoftInputMode="adjustResize">
             <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
         </activity>

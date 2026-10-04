@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 
-function player() {
+function player(storage = new Map()) {
     const elements = new Map();
     const element = () => ({style: {}, classList: {add() {}, remove() {}, toggle() {}}, scrollIntoView() {}, appendChild() {}, remove() {}, innerHTML: '', textContent: '', value: ''});
     const audio = {paused: true, currentTime: 0, duration: 1200, playbackRate: 1, playCount: 0,
@@ -27,8 +27,10 @@ function player() {
         clearTimeout(id) { if (timers[id - 1]) timers[id - 1].cleared = true; },
         setInterval(fn, ms) { intervals.push({fn, ms}); return intervals.length; },
         clearInterval(id) { if (intervals[id - 1]) intervals[id - 1].cleared = true; },
-        fetch: async (...args) => { fetchCalls.push(args); return {json: async () => ({status:'success', answer:'Answer'})}; },
-        localStorage: {getItem() { return null; }}});
+        fetch: async (...args) => { fetchCalls.push(args); return {json: async () => args[0] === '/api/retranscribe_sentence'
+            ? {status:'success',cue:{start:.2,end:19.8,text:'Corrected sentence.',source_start:0,source_end:20}}
+            : {status:'success', answer:'Answer'}}; },
+        localStorage: {getItem(key) { return storage.get(key) ?? null; },setItem(key,value) {storage.set(key,value);}}});
     const html = fs.readFileSync(path.join(__dirname, '../static/index.html'), 'utf8');
     vm.runInContext(html.match(/<script>([\s\S]*?)<\/script>/)[1], context);
     vm.runInContext('toast = () => {}', context);
@@ -40,6 +42,103 @@ function player() {
 }
 
 const cue = (start, end) => ({status: 'cue', cue: {start, end, text: 'Hello world'}});
+
+test('completion renders the final sentence and stops all recovery and status updates', () => {
+    const p=player();p.start();const stream=p.streams[0];
+    stream.emit(cue(0,20));stream.emit({status:'chunk_ready',until:30});
+    stream.emit({status:'finishing'});
+    assert.match(p.elements.get('refreshBtn').innerHTML,/收尾中/);
+    stream.emit({status:'cue',cue:{start:30,end:32,text:'Final sentence.'}});
+    stream.emit({status:'done'});
+    assert.equal(p.run('isTranscribing'),false);
+    assert.equal(p.run('subtitlesComplete'),true);
+    assert.match(p.elements.get('subScroll').innerHTML,/id="cue-1"/);
+    assert.match(p.elements.get('subScroll').innerHTML,/Final/);
+    assert.doesNotMatch(p.elements.get('refreshBtn').innerHTML,/转写中|收尾中/);
+    assert.equal(stream.closed,true);
+    stream.emit({status:'progress',detail:'Stale progress'});stream.onerror();p.advance(200000);
+    assert.equal(p.timers.filter(t=>!t.cleared).length,0);
+    assert.equal(p.streams.length,1);
+});
+
+test('switching episodes explicitly cancels both the stream and sentence cloud jobs', async () => {
+    const p=player();p.start();const old=p.streams[0];old.emit(cue(0,20));
+    const id=new URL(old.url,'http://localhost').searchParams.get('request_id');
+    p.run("fetch=(url,options)=>{if(url==='/api/retranscribe_sentence'){window.sentenceBody=JSON.parse(options.body);return new Promise(resolve=>window.completeSentence=resolve)}globalThis.cancelledIds??=[];cancelledIds.push(JSON.parse(options.body).request_id);return Promise.resolve({json:async()=>({status:'cancelled'})})}");
+    const pending=p.run('regenerateSentence({stopPropagation(){}},0)');
+    p.start('https://example.com/next.mp3');
+    assert.equal(old.closed,true);
+    assert.ok(p.run('cancelledIds').includes(id));
+    assert.ok(p.run('cancelledIds.includes(window.sentenceBody.request_id)'));
+    p.run("window.completeSentence({json:async()=>({status:'success',cue:{start:0,end:20,text:'Stale'}})})");
+    await pending;assert.equal(p.run('cues.length'),0);
+});
+
+test('intermittent progress cannot reset the total automatic retry limit', () => {
+    const p=player();p.start();
+    for(let i=0;i<20;i++){
+        p.streams.at(-1).emit({status:'chunk_ready',until:(i+1)*30});
+        p.streams.at(-1).onerror();p.retry();
+    }
+    p.streams.at(-1).emit({status:'chunk_ready',until:630});p.streams.at(-1).onerror();
+    assert.equal(p.timers.filter(t=>!t.cleared).length,0);
+    assert.equal(p.run('isTranscribing'),false);
+});
+
+test('subtitle exports preserve corrected text and millisecond timing', () => {
+    const p = player();
+    const snapshot = {episode:{title:'Episode',author:'Author'},complete:false,cues:[{start:59.9996,end:62.25,text:'Corrected sentence.'}]};
+    p.run(`globalThis.exportSample=${JSON.stringify(snapshot)}`);
+    assert.match(p.run("transcriptExportText(exportSample,'srt')"), /00:01:00,000 --> 00:01:02,250/);
+    assert.match(p.run("transcriptExportText(exportSample,'vtt')"), /^WEBVTT\n\n1\n00:01:00\.000/);
+    assert.match(p.run("transcriptExportText(exportSample,'txt')"), /部分字幕.*\n\n\[00:01:00\.000\] Corrected sentence/s);
+});
+
+test('Android sharing sends the complete document without format selection', () => {
+    const p=player();let result;
+    p.run("nowPlaying={title:'Episode',author:'Author'};cues=[{start:0,end:1,text:'Corrected sentence.'}];subtitlesComplete=true");
+    p.run('window.PodcastAndroid={shareSubtitle:(title,text)=>{globalThis.sharedResult={title,text}}}');
+    p.run('exportSubtitles()');
+    result=p.run('sharedResult');
+    assert.equal(result.title,'Episode');
+    assert.match(result.text,/完整字幕/);
+    assert.match(result.text,/Corrected sentence/);
+    assert.doesNotMatch(result.text,/WEBVTT|-->/);
+});
+
+test('Android sharing blocks incomplete subtitles and enables only after completion', () => {
+    const p=player();
+    p.run("nowPlaying={title:'Episode'};cues=[{start:0,end:1,text:'First sentence.'}];subtitlesComplete=false;window.PodcastAndroid={shareSubtitle:()=>{globalThis.shared=true}}");
+    p.run('updateAiAvailability();exportSubtitles()');
+    assert.equal(p.elements.get('subtitleShareBtn').disabled,true);
+    assert.equal(p.run('globalThis.shared'),undefined);
+    p.run('subtitlesComplete=true;updateAiAvailability()');
+    assert.equal(p.elements.get('subtitleShareBtn').disabled,false);
+    p.run('shareSubtitleTranscript()');
+    assert.equal(p.run('globalThis.shared'),true);
+    p.run('subtitlesComplete=false;updateAiAvailability()');
+    assert.equal(p.elements.get('subtitleShareBtn').disabled,true);
+});
+
+test('print snapshot escapes content and marks incomplete transcripts', () => {
+    const p = player();
+    p.run(`nowPlaying={title:'<script>bad</script>',author:'A & B',url:'https://example.com',description:'Description'};cues=[{start:0,end:1,text:'<img onerror=bad>'}];subtitlesComplete=false`);
+    const html = p.run('buildPrintableTranscript(transcriptSnapshot())');
+    assert.match(html,/&lt;script&gt;bad&lt;\/script&gt;/);
+    assert.match(html,/&lt;img onerror=bad&gt;/);
+    assert.match(html,/部分字幕/);
+    assert.match(html,/@page\{size:A4/);
+    assert.match(html,/A &amp; B/);
+});
+
+test('dictionary provider loads and is sent with settings', async () => {
+    const p = player();
+    p.run("applyProviderSettings({dictionary_provider:'gemini',aliyun_region:'beijing'})");
+    assert.equal(p.elements.get('dictionaryProvider').value, 'gemini');
+    p.elements.get('dictionaryProvider').value = 'qwen';
+    await p.run('saveApiSettings({preventDefault(){}})');
+    assert.equal(JSON.parse(p.fetchCalls[0][1].body).dictionary_provider, 'qwen');
+});
 
 test('wait for complete first chunk before playing; audio_ready never starts playback', () => {
     const p = player(); p.start(); const s = p.streams[0];
@@ -186,4 +285,62 @@ test('chat is blocked before complete subtitles, then sends the whole transcript
     assert.equal(body.full_transcript, 'Hello world');
     p.start('https://example.com/next.mp3');
     assert.equal(p.elements.get('aiSendBtn').disabled, true);
+});
+
+test('single sentence retry preserves other cues, playback and manual pause', async () => {
+    const p=player(); p.start(); const s=p.streams[0];
+    s.emit(cue(0,20)); s.emit(cue(30,55)); s.emit({status:'chunk_ready',until:60});
+    p.audio.currentTime=35; p.run('togglePlay()');
+    await p.run('regenerateSentence({stopPropagation(){}},0)');
+    assert.equal(p.run('cues.length'),2);
+    assert.equal(p.run('cues[0].text'),'Corrected sentence.');
+    assert.equal(p.run('cues[1].text'),'Hello world');
+    assert.equal(p.audio.currentTime,35);
+    assert.equal(p.audio.paused,true);
+    const body=JSON.parse(p.fetchCalls[0][1].body);
+    assert.equal(body.start,0);assert.equal(body.end,20);
+});
+
+test('late sentence retry cannot modify a newly selected episode', async () => {
+    const p=player();p.start();p.streams[0].emit(cue(0,20));
+    p.run("fetch=(url)=>url==='/api/cancel_transcription'?Promise.resolve({json:async()=>({status:'cancelled'})}):new Promise(resolve=>window.finishRetry=resolve)");
+    const pending=p.run('regenerateSentence({stopPropagation(){}},0)');
+    p.start('https://example.com/next.mp3');
+    p.run("window.finishRetry({json:async()=>({status:'success',cue:{start:0,end:20,text:'Old episode'}})})");
+    await pending;
+    assert.equal(p.run('cues.length'),0);
+});
+
+test('Android recreation restores episode, position and manual pause from persistent state', () => {
+    const storage=new Map();const previous=player(storage);previous.run('window.androidNativeRuntime=true');previous.start();
+    previous.streams[0].emit(cue(0,20));previous.streams[0].emit({status:'chunk_ready',until:30});
+    previous.audio.currentTime=17;previous.run('togglePlay();saveAndroidPlaybackState()');
+    const restored=player(storage);restored.run('window.androidNativeRuntime=true;restoreAndroidPlaybackState()');
+    assert.equal(restored.run('nowPlaying.url'),'https://example.com/one.mp3');
+    assert.equal(restored.audio.currentTime,17);assert.equal(restored.run('wantsPlayback'),false);
+    restored.streams[0].emit({status:'resumed',until:30,cues:[{start:0,end:20,text:'Hello world'}]});
+    assert.equal(restored.audio.paused,true);
+});
+
+test('Android foreground recovery resumes SSE without clearing cues or playback position', () => {
+    const p=player();p.start();p.streams[0].emit(cue(0,20));p.streams[0].emit({status:'chunk_ready',until:30});
+    p.audio.currentTime=12;p.run('togglePlay();resumeAndroidPlayback()');
+    assert.equal(p.streams.length,2);assert.match(p.streams[1].url,/force_refresh=false/);
+    assert.equal(p.run('cues.length'),1);assert.equal(p.audio.currentTime,12);assert.equal(p.audio.paused,true);
+});
+
+test('dismissed tutor welcome stays hidden after reopening', () => {
+    const storage=new Map();const first=player(storage);first.run('dismissAiWelcome()');
+    assert.equal(storage.get('ai_welcome_dismissed'),'1');
+    const second=player(storage);assert.equal(second.elements.get('aiWelcomeCard').style.display,'none');
+});
+
+test('catalog failures show the server error instead of treating it as podcast data', async () => {
+    const p=player();
+    p.run("fetch=async()=>({ok:false,json:async()=>({message:'Secure connection failed'})})");
+    await p.run('loadTopCharts()');
+    assert.match(p.elements.get('plazaContent').innerHTML,/Secure connection failed/);
+    assert.doesNotMatch(p.elements.get('plazaContent').innerHTML,/forEach/);
+    await p.run("loadPodcast('1200361736')");
+    assert.match(p.elements.get('plazaContent').innerHTML,/Secure connection failed/);
 });
