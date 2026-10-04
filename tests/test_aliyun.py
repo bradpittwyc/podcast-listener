@@ -246,3 +246,16 @@ class AliyunTests(unittest.TestCase):
                 self.assertEqual(cache.read_bytes(), contents)
             finally:
                 release.set(); iterator.close(); server.shutdown(); server.server_close()
+
+    def test_prefix_decode_progress_is_forwarded_without_advancing_transcript_coverage(self):
+        def frames(audio_url,audio_path,proxies,signal,resume):
+            signal.on_decode_progress(12)
+            yield bytes(32000)
+        with tempfile.TemporaryDirectory() as directory:
+            folder=Path(directory)
+            with patch.dict(os.environ,{'DASHSCOPE_API_KEY_1':'first','DASHSCOPE_API_KEY_2':'second'}), \
+                 patch.object(aliyun,'StreamTask',FakeTask), patch.object(aliyun,'pcm_frames',side_effect=frames):
+                events=list(aliyun.transcript_events('x',folder/'a.mp3',folder/'a.vtt',folder/'a.progress.json',None,threading.Event()))
+            self.assertIn({'status':'decode_progress','until':12},events)
+            self.assertEqual({e['until'] for e in events if e['status']=='chunk_ready'},{1})
+            self.assertEqual(events[-1]['status'],'done')

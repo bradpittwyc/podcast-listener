@@ -8,7 +8,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 final class TranscriptionJobs {
     static final class Control {
         final AtomicBoolean stopped = new AtomicBoolean();
-        private final Set<Runnable> callbacks = ConcurrentHashMap.newKeySet();
+        private final Set<Runnable> callbacks = Collections.newSetFromMap(new ConcurrentHashMap<Runnable,Boolean>());
         Runnable onCancel(Runnable callback) {
             callbacks.add(callback);
             if(stopped.get() && callbacks.remove(callback))callback.run();
@@ -46,6 +46,6 @@ final class TranscriptionJobs {
         }
         if(control!=null)control.stop();
     }
-    void release(String token,Control control){control.stop();active.remove(token,control);}
+    synchronized void release(String token,Control control){control.stop();if(active.get(token)==control)active.remove(token);}
     void close(){for(Control control:active.values())control.stop();active.clear();}
 }

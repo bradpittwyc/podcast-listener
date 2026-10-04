@@ -216,7 +216,7 @@ test('streaming source is selected before subtitles; completing the cache never 
 
 test('word apostrophes are escaped and VTT cue settings are parsed', () => {
     const p = player();
-    assert.match(p.run(`wordSpans("don't", 2)`), /don\\'t/);
+    assert.match(p.run(`wordSpans("don't", 2)`), /data-word="don't"/);
     assert.equal(p.run(`parseVtt('WEBVTT\\n\\n00:00:01.000 --> 00:00:02.000 align:start\\nHello')[0].end`), 2);
 });
 
@@ -315,7 +315,7 @@ test('late sentence retry cannot modify a newly selected episode', async () => {
     assert.equal(p.run('cues.length'),0);
 });
 
-test('Android cold start clears persistent playback state and stays on home screen', () => {
+test('Android cold start keeps progress without opening an episode; manual selection resumes it', () => {
     const storage=new Map();const previous=player(storage);previous.run('window.androidNativeRuntime=true');previous.start();
     previous.streams[0].emit(cue(0,20));previous.streams[0].emit({status:'chunk_ready',until:30});
     previous.audio.currentTime=17;previous.run('togglePlay();saveAndroidPlaybackState()');
@@ -323,6 +323,13 @@ test('Android cold start clears persistent playback state and stays on home scre
     assert.equal(restored.run('nowPlaying'),null);
     assert.equal(restored.audio.currentTime,0);assert.equal(restored.run('wantsPlayback'),false);
     assert.equal(storage.has('android_playback_state'),false);
+    assert.equal(JSON.parse(storage.get('podcast_playback_progress'))[0].position,17);
+    restored.start();
+    assert.equal(restored.run('androidRestorePosition'),17);
+    restored.streams[0].emit(cue(0,20));restored.streams[0].emit({status:'chunk_ready',until:10});
+    assert.equal(restored.audio.paused,true);
+    restored.streams[0].emit({status:'chunk_ready',until:30});
+    assert.equal(restored.audio.currentTime,17);assert.equal(restored.audio.paused,false);
 });
 
 test('quick questions and selected-example-only questions work while transcription continues', async () => {
@@ -452,6 +459,75 @@ test('Android foreground recovery replaces a legacy direct URL at a nonzero posi
 });
 
 const settleTranslation = async () => { for (let i=0;i<8;i++) await new Promise(resolve=>setImmediate(resolve)); };
+
+test('ended audio never autoplays on foreground recovery or late subtitle completion', () => {
+    const p=player();p.start();p.streams[0].emit(cue(0,20));p.streams[0].emit({status:'chunk_ready',until:30});
+    p.audio.currentTime=20;p.audio.paused=true;p.audio.onended();const count=p.audio.playCount;
+    p.streams[0].emit({status:'done'});p.run('resumeAndroidPlayback()');
+    assert.equal(p.audio.playCount,count);assert.equal(p.run('wantsPlayback'),false);
+    p.run('togglePlay()');assert.equal(p.audio.currentTime,0);assert.equal(p.audio.paused,false);
+});
+
+test('seek back into subtitle coverage resumes waiting playback but preserves manual pause', () => {
+    const p=player();p.start();p.streams[0].emit(cue(0,20));p.streams[0].emit({status:'chunk_ready',until:30});
+    p.audio.currentTime=60;p.audio.ontimeupdate();assert.equal(p.audio.paused,true);
+    p.run('skipAudio(-50)');assert.equal(p.audio.currentTime,10);assert.equal(p.audio.paused,false);
+    p.run('togglePlay();seekPlayback(5)');p.audio.onseeked();assert.equal(p.audio.paused,true);
+});
+
+test('AB loop at subtitle frontier loops before applying subtitle waiting', () => {
+    const p=player();p.start();p.streams[0].emit(cue(0,29));p.streams[0].emit({status:'chunk_ready',until:30});
+    p.run('loopA=10;loopB=30;loopOn=true');p.audio.currentTime=30.1;p.audio.ontimeupdate();
+    assert.equal(p.audio.currentTime,10);assert.equal(p.audio.paused,false);assert.equal(p.run('waitingForSubtitles'),false);
+});
+
+test('switching or clearing chat aborts stale answers and preserves new selections', async () => {
+    for (const action of ['startPlay("https://example.com/next.mp3","Next","Show","","","")','clearAiChat()']) {
+        const p=player();p.start();p.streams[0].emit(cue(0,20));
+        p.run("document.getElementById('aiInput').value='Explain';globalThis.answers=[];appendChatMessage=(role,text)=>answers.push({role,text});fetch=(url,options)=>url==='/api/ask'?(globalThis.askSignal=options.signal,new Promise(resolve=>globalThis.reply=resolve)):Promise.resolve({json:async()=>({})})");
+        const pending=p.run('sendAiQuestion()');p.run(action);p.run('selectedCues.add(1)');
+        assert.equal(p.run('askSignal.aborted'),true);
+        p.run("reply({json:async()=>({status:'success',answer:'Stale answer'})})");await pending;
+        assert.equal(p.run("answers.some(row=>row.text==='Stale answer')"),false);
+        assert.equal(p.run('selectedCues.has(1)'),true);assert.equal(p.run('aiSending'),false);
+    }
+});
+
+test('legacy progress migrates without cold autoplay and completed episodes start fresh', () => {
+    const storage=new Map([['android_playback_state',JSON.stringify({episode:{url:'https://example.com/one.mp3'},position:17,speed:.75,volume:.6})]]);
+    const p=player(storage);p.run('window.androidNativeRuntime=true;restoreAndroidPlaybackState()');
+    assert.equal(p.audio.playCount,0);p.start();assert.equal(p.run('androidRestorePosition'),17);assert.equal(p.run('speed'),.75);
+    p.run('androidRestorePosition=null');p.audio.currentTime=1200;p.audio.onended();
+    const next=player(storage);next.run('window.androidNativeRuntime=true');next.start();
+    assert.equal(next.run('androidRestorePosition'),null);
+});
+
+test('audio network recovery keeps position and stops on manual pause or episode change', () => {
+    const p=player();p.start();p.streams[0].emit(cue(0,20));p.streams[0].emit({status:'chunk_ready',until:30});
+    p.audio.currentTime=12;p.audio.error={code:2};p.audio.onerror();p.retry();
+    assert.equal(p.audio.currentTime,12);assert.match(p.audio.src,/\/api\/audio\?/);
+    p.audio.error=null;p.audio.onloadedmetadata();assert.equal(p.audio.currentTime,12);
+    p.audio.error={code:2};p.audio.onerror();p.run('togglePlay()');assert.equal(p.run('audioRecoveryTimer'),null);
+    p.run('wantsPlayback=true');p.audio.onerror();const timer=p.timers.at(-1);p.start('https://example.com/two.mp3');
+    assert.equal(timer.cleared,true);timer.fn();assert.match(p.audio.src,/two.mp3/);
+});
+
+test('foreground preserves a healthy stream and real prefix progress prevents premature restart', () => {
+    const p=player();p.start();const stream=p.streams[0];stream.readyState=1;
+    p.run('window.androidNativeRuntime=true;resumeAndroidPlayback()');assert.equal(p.streams.length,1);
+    for(let i=1;i<=6;i++){stream.emit({status:'decode_progress',until:i*30});p.advance(40000);}
+    assert.equal(stream.closed,undefined);assert.equal(p.run('coveredUntil'),0);assert.equal(p.audio.paused,true);
+    p.advance(50000);assert.equal(stream.closed,true);
+});
+
+test('reselecting the same sentence while a tutor reply is pending preserves the new selection', async () => {
+    const p=player();p.start();p.streams[0].emit(cue(0,20));
+    p.run("onCueCheckChange(0,true);document.getElementById('aiInput').value='Explain';appendChatMessage=()=>{};fetch=()=>new Promise(resolve=>globalThis.reply=resolve)");
+    const pending=p.run('sendAiQuestion()');p.run('onCueCheckChange(0,false);onCueCheckChange(0,true)');
+    p.run("reply({json:async()=>({status:'success',answer:'Answer'})})");await pending;
+    assert.equal(p.run('selectedCues.has(0)'),true);assert.equal(p.run('aiSending'),false);
+});
+
 function translationPlayer() {
     const p=player();p.start();
     p.run("fetch=async(url,options)=>{globalThis.translationRequests??=[];translationRequests.push(JSON.parse(options.body));return {json:async()=>({status:'success',translations:JSON.parse(options.body).sentences.map(s=>({id:s.id,translation:'中文 '+s.text}))})}}");

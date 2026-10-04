@@ -222,11 +222,16 @@ def pcm_frames(audio_url, audio_path, proxies, stopped, resume):
         downloader = threading.Thread(target=transfer, daemon=True); downloader.start()
     try:
         remaining = 0 if cached else round(resume * 32000)
+        last_decode_progress = time.monotonic()
         while remaining and not stopped.is_set():
             part = process.stdout.read(min(3200, remaining))
             if not part:
                 raise RuntimeError("音频长度短于已保存的断点。")
             remaining -= len(part)
+            if time.monotonic() - last_decode_progress > 5:
+                callback = getattr(stopped,'on_decode_progress',None)
+                if callback: callback(resume-remaining/32000)
+                last_decode_progress = time.monotonic()
         while not stopped.is_set():
             frame = process.stdout.read(3200)
             if not frame:
@@ -370,6 +375,12 @@ def transcript_events(audio_url, audio_path, vtt_path, checkpoint_path, proxies,
 
     class Signal:
         def is_set(self): return stopped.is_set() or cancel.is_set()
+        def on_decode_progress(self, until):
+            while not self.is_set():
+                try:
+                    tasks.put({'status':'decode_progress','until':until},timeout=.2)
+                    return
+                except queue.Full: pass
         def wait(self, seconds):
             deadline = time.monotonic() + seconds
             while not self.is_set() and time.monotonic() < deadline:
@@ -432,6 +443,9 @@ def transcript_events(audio_url, audio_path, vtt_path, checkpoint_path, proxies,
             if task is None:
                 if failure: raise failure[0]
                 break
+            if isinstance(task, dict):
+                yield task
+                continue
             while not signal.is_set():
                 if audio_ended.is_set() and not finishing_sent:
                     finishing_sent = True

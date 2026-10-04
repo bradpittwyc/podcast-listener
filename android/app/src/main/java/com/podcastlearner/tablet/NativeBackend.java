@@ -32,7 +32,7 @@ public final class NativeBackend implements AutoCloseable {
     private final CredentialsWriter writer;
     private final ExecutorService clients = Executors.newCachedThreadPool();
     private final ScheduledExecutorService timer = Executors.newScheduledThreadPool(1);
-    private final Set<Socket> sockets = ConcurrentHashMap.newKeySet();
+    private final Set<Socket> sockets = Collections.newSetFromMap(new ConcurrentHashMap<Socket,Boolean>());
     private final ConcurrentHashMap<String,Semaphore> locks = new ConcurrentHashMap<>();
     private final TranscriptionJobs transcriptionJobs=new TranscriptionJobs();
     private ServerSocket listener;
@@ -50,6 +50,7 @@ public final class NativeBackend implements AutoCloseable {
     }
 
     void start() throws IOException {
+        CachePolicy.prune(new File(context.getFilesDir(),"transcripts"),Collections.emptySet(),64L*1024*1024,30L*86400*1000);
         listener = new ServerSocket(); listener.setReuseAddress(true);
         listener.bind(new InetSocketAddress(InetAddress.getByName("127.0.0.1"),8557));
         clients.execute(() -> {
@@ -86,7 +87,7 @@ public final class NativeBackend implements AutoCloseable {
     }
     private static class RequestData {
         String method,path; Map<String,String> query=new HashMap<>(), headers=new HashMap<>(); JSONObject body=new JSONObject();
-        String q(String name) { return query.getOrDefault(name,""); }
+        String q(String name) { return query.containsKey(name)?query.get(name):""; }
     }
     private void serve(Socket socket) {
         try(Socket connection=socket) {
@@ -97,9 +98,9 @@ public final class NativeBackend implements AutoCloseable {
             if(uri.getRawQuery()!=null) for(String pair:uri.getRawQuery().split("&")) { String[] parts=pair.split("=",2); request.query.put(URLDecoder.decode(parts[0],"UTF-8"),parts.length>1?URLDecoder.decode(parts[1],"UTF-8"):""); }
             int headerSize=0; String header;
             while(!(header=line(input)).isEmpty()) { headerSize+=header.length(); if(headerSize>65536) return; int colon=header.indexOf(':'); if(colon>0)request.headers.put(header.substring(0,colon).toLowerCase(Locale.ROOT),header.substring(colon+1).trim()); }
-            String host=request.headers.getOrDefault("host","");
+            String host=(request.headers.containsKey("host")?request.headers.get("host"):"");
             if(!host.equals("127.0.0.1:8557") && !host.equals("localhost:8557")) { response(output,403,"application/json",bytes("{}")); return; }
-            int length=Integer.parseInt(request.headers.getOrDefault("content-length","0"));
+            int length=Integer.parseInt((request.headers.containsKey("content-length")?request.headers.get("content-length"):"0"));
             if(length<0 || length>4*1024*1024) { response(output,413,"application/json",bytes("{}")); return; }
             if(length>0) { byte[] body=new byte[length]; int offset=0,count; while(offset<length && (count=input.read(body,offset,length-offset))>0)offset+=count; if(offset!=length)return; request.body=new JSONObject(new String(body,StandardCharsets.UTF_8)); }
             connection.setSoTimeout(0);
@@ -136,7 +137,7 @@ public final class NativeBackend implements AutoCloseable {
             if(r.method.equals("POST")) {
                 String origin=r.headers.get("origin");
                 if(origin!=null && !origin.equals("http://127.0.0.1:8557")) { response(output,403,"application/json",bytes("{}")); return; }
-                if(!r.headers.getOrDefault("content-type","").contains("application/json")) { response(output,415,"application/json",bytes("{}")); return; }
+                if(!(r.headers.containsKey("content-type")?r.headers.get("content-type"):"").contains("application/json")) { response(output,415,"application/json",bytes("{}")); return; }
                 synchronized(this) {
                     JSONObject next=new JSONObject(credentials.toString());
                     for(String name:new String[]{"aliyun_key_1","aliyun_key_2","gemini_key"}) {
@@ -296,7 +297,7 @@ public final class NativeBackend implements AutoCloseable {
             // MediaExtractor seeks repeatedly. Replaying all tracking redirects
             // for every Range request can take minutes before decoding starts.
             resolvedAudio.put(original,connection.getURL().toString());
-            String headers="HTTP/1.1 "+code+" OK\r\nContent-Type: "+Optional.ofNullable(connection.getContentType()).orElse("audio/mpeg")+"\r\nConnection: close\r\nAccept-Ranges: bytes\r\n";
+            String headers="HTTP/1.1 "+code+" OK\r\nContent-Type: "+(connection.getContentType()==null?"audio/mpeg":connection.getContentType())+"\r\nConnection: close\r\nAccept-Ranges: bytes\r\n";
             for(String name:new String[]{"Content-Length","Content-Range"}) {String value=connection.getHeaderField(name);if(value!=null)headers+=name+": "+value+"\r\n";}
             output.write(bytes(headers+"\r\n")); output.flush();
             // Headers are already committed. On disconnect, close this audio
@@ -504,7 +505,7 @@ public final class NativeBackend implements AutoCloseable {
         String token=TranscriptionJobs.token(request.q("request_id"));
         TranscriptionJobs.Control control=transcriptionJobs.register(token);
         control.onCancel(()->{try{socket.close();}catch(IOException ignored){}});
-        Events events=new Events(output,control);events.jobId=token;String url=request.q("audio_url");events.correctionsFile=corrections(url);Semaphore lock=locks.computeIfAbsent(url,key->new Semaphore(1));
+        Events events=new Events(output,control);events.jobId=token;String url=request.q("audio_url");events.correctionsFile=corrections(url);Semaphore lock; synchronized(locks){lock=locks.get(url);if(lock==null){lock=new Semaphore(1);locks.put(url,lock);}}
         ScheduledFuture<?> heartbeat=timer.scheduleAtFixedRate(()->{try{events.send(object("status","heartbeat"));}catch(Exception e){control.stop();}},10,10,TimeUnit.SECONDS);
         boolean acquired=false;
         try {
@@ -513,7 +514,7 @@ public final class NativeBackend implements AutoCloseable {
             events.send(object("status","audio_source","audio_url","/api/audio?url="+encode(url)));
             AtomicFile file=checkpoint(url);if(request.q("force_refresh").equals("true")){file.delete();events.correctionsFile.delete();}JSONObject state=load(file);
             JSONArray cues=state.optJSONArray("cues");if(cues==null)cues=new JSONArray();
-            if(state.optBoolean("complete")){events.send(object("status","cached","vtt",vtt(correctCues(cues,load(events.correctionsFile).optJSONArray("cues")))));return;}
+            if(state.optBoolean("complete")){file.getBaseFile().setLastModified(System.currentTimeMillis());events.send(object("status","cached","vtt",vtt(correctCues(cues,load(events.correctionsFile).optJSONArray("cues")))));return;}
             String transcript=request.q("transcript_url");
             if(!transcript.isEmpty()&&state.optDouble("until",0)==0) {
                 try {HttpURLConnection cc=open(transcript,null);String content;try{content=new String(read(cc.getInputStream(),12*1024*1024),StandardCharsets.UTF_8);}finally{cc.disconnect();}
@@ -608,9 +609,12 @@ public final class NativeBackend implements AutoCloseable {
             MediaFormat format=null;for(int i=0;i<extractor.getTrackCount();i++){MediaFormat candidate=extractor.getTrackFormat(i);if(candidate.getString(MediaFormat.KEY_MIME).startsWith("audio/")){format=candidate;extractor.selectTrack(i);break;}}
             if(format==null)throw new IOException("No supported audio track");
             if(format.containsKey(MediaFormat.KEY_DURATION))endAt=Math.min(endAt,format.getLong(MediaFormat.KEY_DURATION)/1000000.0+.25);
+            // Seek to the preceding frame, then discard only its overlap with the checkpoint.
+            if(resume>0)extractor.seekTo((long)(resume*1000000),MediaExtractor.SEEK_TO_PREVIOUS_SYNC);
+            double decodedStart=Math.max(0,extractor.getSampleTime()/1000000.0);
             codec=MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME));codec.configure(format,null,null,0);codec.start();
             int sourceRate=format.getInteger(MediaFormat.KEY_SAMPLE_RATE),channels=format.getInteger(MediaFormat.KEY_CHANNEL_COUNT),encoding=AudioFormat.ENCODING_PCM_16BIT;
-            int targetRate=16000;long sourceFrame=0,nextTargetFrame=0,skip=Math.round(resume*targetRate);
+            int targetRate=16000;long sourceFrame=Math.round(decodedStart*sourceRate),nextTargetFrame=Math.round(decodedStart*targetRate),skip=Math.round(resume*targetRate);
             ByteArrayOutputStream pcm=new ByteArrayOutputStream();boolean inputEnded=false,outputEnded=false;MediaCodec.BufferInfo info=new MediaCodec.BufferInfo();
             while(!outputEnded&&!events.stopped.get()&&!closed) {
                 pipeline.drain(false);

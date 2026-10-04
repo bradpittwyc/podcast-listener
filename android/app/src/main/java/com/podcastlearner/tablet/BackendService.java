@@ -56,6 +56,6 @@ public final class BackendService extends Service {
     @Override public IBinder onBind(Intent intent){return null;}
     @Override public void onDestroy(){
         synchronized(this){closing=true;if(backend!=null){backend.close();backend=null;}}
-        startup.shutdownNow();super.onDestroy();
+        startup.shutdownNow();PlaybackSession.close();super.onDestroy();
     }
 }

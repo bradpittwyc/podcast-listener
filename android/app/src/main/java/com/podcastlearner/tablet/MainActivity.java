@@ -99,7 +99,8 @@ public class MainActivity extends Activity {
         brand.addView(retry,new LinearLayout.LayoutParams(dp(112),dp(44)));
         FrameLayout.LayoutParams brandParams=new FrameLayout.LayoutParams(-1,-2,Gravity.CENTER);
         brandParams.leftMargin=dp(24);brandParams.rightMargin=dp(24);splash.addView(brand,brandParams);
-        web = new WebView(this);
+        web = PlaybackSession.obtain(this);
+        boolean retainedPage = web.getUrl() != null && web.getUrl().startsWith(server + "/");
         WebView.setWebContentsDebuggingEnabled((getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE)!=0);
         web.setBackgroundColor(0xff09090f);
         web.getSettings().setJavaScriptEnabled(true);
@@ -140,6 +141,7 @@ public class MainActivity extends Activity {
         layout.addView(web,new FrameLayout.LayoutParams(-1,-1));
         layout.addView(splash,new FrameLayout.LayoutParams(-1,-1));
         setContentView(layout);
+        if (retainedPage) showReadyPage(web.getUrl());
     }
 
     private void connect() {
@@ -173,7 +175,7 @@ public class MainActivity extends Activity {
 
     @Override protected void onResume(){super.onResume();if(web!=null){web.onResume();connect();}}
     @Override protected void onPause(){
-        if(web!=null){web.evaluateJavascript("saveAndroidPlaybackState()",null);web.onPause();}
+        if(web!=null){web.evaluateJavascript("saveAndroidPlaybackState()",null);}
         super.onPause();
     }
     private int dp(float value){return Math.round(value*getResources().getDisplayMetrics().density);}
@@ -193,5 +195,13 @@ public class MainActivity extends Activity {
             }
         });
     }
-    @Override protected void onDestroy() { destroyed=true; web.destroy(); super.onDestroy(); }
+    @Override protected void onDestroy() {
+        destroyed=true;
+        if(web!=null && web.getParent()==layout){
+            PlaybackSession.detach(web);
+            web.removeJavascriptInterface("PodcastAndroid");
+            web.setWebViewClient(new WebViewClient());
+        }
+        super.onDestroy();
+    }
 }

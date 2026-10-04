@@ -1713,6 +1713,7 @@ function stopTranscriptionJobs() {
     sentenceJobs.clear();
 }
 let subtitleStream = null;
+let subtitleLastActivity = 0;
 let subtitleRequest = 0;
 let coveredUntil = 0;
 let subtitlesComplete = false;
@@ -1723,35 +1724,87 @@ let androidStateSavedAt = 0;
 function saveAndroidPlaybackState() {
     if (!window.androidNativeRuntime || !nowPlaying) return;
     try {
-        localStorage.setItem('android_playback_state', JSON.stringify({episode:nowPlaying,
-            position:androidRestorePosition ?? audio.currentTime, playing:wantsPlayback,
-            speed, volume:lastVolume}));
+        const records = playbackProgress().filter(record => record.url !== nowPlaying.url);
+        records.unshift({url:nowPlaying.url,position:androidRestorePosition ?? audio.currentTime,
+            speed,volume:lastVolume,completed:playbackEnded,updated:Date.now()});
+        localStorage.setItem('podcast_playback_progress',JSON.stringify(records.slice(0,200)));
     } catch (_) {}
+}
+function playbackProgress() {
+    try {
+        const records = JSON.parse(localStorage.getItem('podcast_playback_progress') || '[]');
+        return Array.isArray(records) ? records.filter(record => record && typeof record.url === 'string'
+            && Number.isFinite(record.position) && record.position >= 0) : [];
+    } catch (_) { return []; }
 }
 function restoreAndroidPlaybackState() {
     if (nowPlaying) return;
-    // A cold start always opens on the home screen. Keep state saving for
-    // foreground recovery, but never reopen or autoplay the last episode
-    // after the WebView/process has been destroyed.
-    try { localStorage.removeItem('android_playback_state'); } catch (_) {}
+    // Migrate legacy progress without opening an episode or starting playback.
+    try {
+        const old = JSON.parse(localStorage.getItem('android_playback_state') || 'null');
+        if (old?.episode?.url && Number.isFinite(old.position) && old.position >= 0) {
+            const records = playbackProgress();
+            if (!records.some(record => record.url === old.episode.url)) {
+                records.unshift({url:old.episode.url,position:old.position,speed:old.speed,volume:old.volume});
+                localStorage.setItem('podcast_playback_progress',JSON.stringify(records.slice(0,200)));
+            }
+        }
+        localStorage.removeItem('android_playback_state');
+    } catch (_) {}
 }
 
 function resumeAndroidPlayback() {
     if (!nowPlaying) return;
     ensureAndroidAudioSource();
     // Re-open SSE from its durable checkpoint after background WebView suspension.
-    if (!subtitlesComplete) triggerAiTranscribe(true,true);
+    if (!subtitlesComplete && !(subtitleStream?.readyState === 1 && Date.now()-subtitleLastActivity < 45000)) triggerAiTranscribe(true,true);
     else playWhenReady();
 }
 let wantsPlayback = false;
+let playbackEnded = false;
 let waitingForSubtitles = false;
+let audioRecoveryTimer = null;
+let audioRecoveryAttempts = 0;
+function clearAudioRecovery() {
+    clearTimeout(audioRecoveryTimer);
+    audioRecoveryTimer = null;
+}
+function scheduleAudioRecovery(stalled = false) {
+    if (!nowPlaying || !wantsPlayback || playbackEnded || audioRecoveryTimer !== null || audioRecoveryAttempts >= 6) return;
+    const episode = nowPlaying, position = audio.currentTime;
+    const delay = stalled ? 12000 : Math.min(15000,1000 * 2 ** audioRecoveryAttempts);
+    audioRecoveryTimer = setTimeout(() => {
+        audioRecoveryTimer = null;
+        if (episode !== nowPlaying || !wantsPlayback || playbackEnded) return;
+        // A stalled download can coexist with healthy buffered playback.
+        if (stalled && (audio.currentTime > position + .1 || audio.readyState >= 3)) return;
+        audioRecoveryAttempts++;
+        androidRestorePosition = audio.currentTime;
+        audio.pause();
+        audio.src = androidAudioSource(episode.url);
+        audio.playbackRate = speed;
+        audio.load?.();
+        playWhenReady();
+    },delay);
+}
 let subtitleRetryTimer = null;
 let subtitleWatchdog = null;
 let reconnectAttempts = 0;
 let aiSending = false;
+let aiRequestEpoch = 0;
+let aiRequestController = null;
+function cancelAiQuestion() {
+    aiRequestEpoch++;
+    aiRequestController?.abort();
+    aiRequestController = null;
+    aiSending = false;
+    document.querySelectorAll('.msg-loading').forEach(el => el.closest('.msg-row')?.remove());
+}
 let savedCues = new Set();
 let notebook = [];
 let selectedCues = new Set(); // Indices of checked cues
+let cueSelectionVersions = new Map();
+let cueSelectionRevision = 0;
 
 // Font Size
 let currentSubFontSize = parseFloat(localStorage.getItem('sub_font_size') || '13.5');
@@ -1867,7 +1920,7 @@ async function loadTopCharts(c = 'us') {
         if (!res.ok || !Array.isArray(data.results)) throw new Error(data.detail || data.message || '播客榜单加载失败');
         renderTopCharts(data.results);
     } catch(e) {
-        setPlaza(`<div style="padding:24px;text-align:center;color:var(--text3);font-size:12px">加载失败: ${e.message}</div>`);
+        setPlaza(`<div style="padding:24px;text-align:center;color:var(--text3);font-size:12px">加载失败: ${escHtml(e.message)}</div>`);
     }
 }
 
@@ -1875,7 +1928,7 @@ function renderTopCharts(results) {
     let h = '<div class="sec-label"><i class="fa-solid fa-chart-line" style="color:var(--purple)"></i> Top 30</div><div class="pod-grid">';
     results.forEach((r, i) => {
         const img = hd(r.artworkUrl600);
-        h += `<div class="pod-card" onclick="loadPodcast('${r.collectionId}')">
+        h += `<div class="pod-card" data-podcast-id="${escHtml(String(r.collectionId))}">
             <img src="${escHtml(img)}" data-fallback="${escHtml(r.artworkUrl600 || '')}" onerror="recoverCover(this)" alt="" loading="lazy">
             <div class="pod-card-info">
                 <div class="pod-card-title">${esc(r.collectionName)}</div>
@@ -1891,6 +1944,19 @@ function setPlaza(html) {
     const el = document.getElementById('plazaContent');
     if (el) el.innerHTML = html;
 }
+
+// External RSS text is stored as data, never compiled as inline JavaScript.
+document.addEventListener('click', event => {
+    const target = event.target.closest?.('[data-podcast-id],[data-episode-index],[data-word],[data-cue-start],[data-notebook-url],[data-notebook-delete]');
+    if (!target) return;
+    const data = target.dataset;
+    if (data.word !== undefined) { event.stopPropagation(); lookupWord(data.word,event,Number(data.cueIndex)); }
+    else if (data.podcastId !== undefined) loadPodcast(data.podcastId);
+    else if (data.episodeIndex !== undefined) playByIdx(Number(data.episodeIndex));
+    else if (data.notebookDelete !== undefined) deleteNb(event,Number(data.notebookDelete));
+    else if (data.notebookUrl !== undefined) jumpFromNotebook(data.notebookUrl,Number(data.notebookStart));
+    else if (!event.target.closest('button,input,a')) jumpTo(Number(data.cueStart));
+});
 
 function handleKey(e) { if (e.key === 'Enter') doSearch(); }
 
@@ -1909,7 +1975,7 @@ async function doSearch() {
         if (!res.ok || !Array.isArray(data.results)) throw new Error(data.detail || data.message || '搜索失败');
         renderSearchResults(data.results);
     } catch(e) {
-        setPlaza(`<div style="padding:24px;text-align:center;color:var(--text3);font-size:12px">搜索失败: ${e.message}</div>`);
+        setPlaza(`<div style="padding:24px;text-align:center;color:var(--text3);font-size:12px">搜索失败: ${escHtml(e.message)}</div>`);
     }
 }
 
@@ -1920,7 +1986,7 @@ function renderSearchResults(results) {
     }
     let h = `<div class="sec-label">搜索结果 (${results.length})</div><div class="pod-grid">`;
     results.forEach(r => {
-        h += `<div class="pod-card" onclick="loadPodcast('${r.collectionId}')">
+        h += `<div class="pod-card" data-podcast-id="${escHtml(String(r.collectionId))}">
             <img src="${escHtml(hd(r.artworkUrl600))}" data-fallback="${escHtml(r.artworkUrl600 || '')}" onerror="recoverCover(this)" alt="" loading="lazy">
             <div class="pod-card-info">
                 <div class="pod-card-title">${esc(r.collectionName)}</div>
@@ -1947,7 +2013,7 @@ async function loadPodcast(id) {
         const feed = data.feedData || data.feed || {};
         renderChannel(feed, currentMeta);
     } catch(e) {
-        setPlaza(`<div style="padding:24px;text-align:center;color:var(--text3);font-size:12px">加载播客失败: ${e.message}</div>`);
+        setPlaza(`<div style="padding:24px;text-align:center;color:var(--text3);font-size:12px">加载播客失败: ${escHtml(e.message)}</div>`);
     }
 }
 
@@ -1960,7 +2026,7 @@ async function loadRssUrl(url) {
         currentMeta = { title: feed.title, collectionName: feed.title, artist: feed.author, artistName: feed.author, artworkUrl600: feed.image };
         renderChannel(feed, currentMeta);
     } catch(e) {
-        setPlaza(`<div style="padding:24px;text-align:center;color:var(--text3);font-size:12px">RSS 加载失败: ${e.message}</div>`);
+        setPlaza(`<div style="padding:24px;text-align:center;color:var(--text3);font-size:12px">RSS 加载失败: ${escHtml(e.message)}</div>`);
     }
 }
 
@@ -2007,7 +2073,7 @@ function renderChannel(feed, meta = {}, page = 1) {
         pageEps.forEach((ep, i) => {
             const actualIdx = startIdx + i;
             const isCur = nowPlaying && nowPlaying.url === ep.audioUrl;
-            h += `<div class="ep-item ${isCur ? 'playing' : ''}" onclick="playByIdx(${actualIdx}, '${escQ(cover)}', '${escQ(author)}')">
+            h += `<div class="ep-item ${isCur ? 'playing' : ''}" data-episode-index="${actualIdx}">
                 <div class="ep-icon"><i class="fa-solid ${isCur ? 'fa-volume-high' : 'fa-play'}"></i></div>
                 <div class="ep-info">
                     <div class="ep-title">${esc(ep.title)}</div>
@@ -2034,14 +2100,19 @@ function renderChannel(feed, meta = {}, page = 1) {
 function playByIdx(idx, cover, author) {
     const ep = currentEpisodes[idx];
     if (!ep) return;
-    startPlay(ep.audioUrl, ep.title, author, cover, ep.transcriptUrl || '', ep.description || '');
+    startPlay(ep.audioUrl, ep.title, author ?? currentFeed?.author ?? currentMeta?.artistName ?? '',
+        cover ?? currentFeed?.image ?? currentMeta?.artworkUrl600 ?? '', ep.transcriptUrl || '', ep.description || '');
 }
 
 function startPlay(url, title, author, cover, transcriptUrl, description) {
+    saveAndroidPlaybackState();
+    cancelAiQuestion();
+    clearAudioRecovery(); audioRecoveryAttempts = 0;
     resetSubtitleTranslations();
     stopTranscriptionJobs();
     totalTranscriptionRetries = 0;
     androidRestorePosition = null;
+    playbackEnded = false;
     if (window.matchMedia && window.matchMedia('(max-width:600px)').matches) collapseSidebar();
     clearSubtitleRecovery();
     reconnectAttempts = 0;
@@ -2056,6 +2127,12 @@ function startPlay(url, title, author, cover, transcriptUrl, description) {
     wantsPlayback = true;
     waitingForSubtitles = true;
     nowPlaying = { url, title, author, cover, transcriptUrl, description };
+    const progress = isAndroidPlayback() ? playbackProgress().find(record => record.url === url) : null;
+    if (progress && !progress.completed) {
+        androidRestorePosition = progress.position;
+        if (Number.isFinite(progress.speed) && progress.speed >= .25 && progress.speed <= 2) setSpeed(progress.speed);
+        if (Number.isFinite(progress.volume) && progress.volume > 0 && progress.volume <= 1) setVolume(progress.volume);
+    }
     savedCues = new Set();
     selectedCues = new Set();
     updateCueSelectionUI();
@@ -2114,7 +2191,7 @@ function canPlayWithSubtitles() {
 }
 
 async function playWhenReady() {
-    if (!wantsPlayback || !nowPlaying) return;
+    if (!wantsPlayback || !nowPlaying || playbackEnded) return;
     if (!canPlayWithSubtitles()) {
         waitingForSubtitles = true;
         audio.pause();
@@ -2129,6 +2206,7 @@ async function playWhenReady() {
         await audio.play();
     } catch (e) {
         if (request !== subtitleRequest || e.name === 'AbortError') return;
+        if (audio.error?.code === 2) { scheduleAudioRecovery(); return; }
         wantsPlayback = false;
         setPlayIcon(false);
         toast('字幕已就绪，请点击播放按钮开始收听。', 'info');
@@ -2137,13 +2215,22 @@ async function playWhenReady() {
 
 function togglePlay() {
     if (!nowPlaying) return;
+    if (playbackEnded) {
+        playbackEnded = false;
+        seekPlayback(0);
+        wantsPlayback = true;
+        playWhenReady();
+        return;
+    }
     if (!audio.paused || (waitingForSubtitles && wantsPlayback)) {
         wantsPlayback = false;
         waitingForSubtitles = false;
+        clearAudioRecovery();
         audio.pause();
         setPlayIcon(false);
     } else {
         wantsPlayback = true;
+        if (audio.error) { audioRecoveryAttempts = 0; scheduleAudioRecovery(); return; }
         playWhenReady();
         if (!canPlayWithSubtitles()) toast('等待当前位置的字幕，就绪后继续播放。', 'info');
     }
@@ -2154,20 +2241,40 @@ function setPlayIcon(playing) {
     if (btn) btn.innerHTML = `<i class="fa-solid ${playing ? 'fa-pause' : 'fa-play'}"></i>`;
 }
 
-function skipAudio(s) { 
-    audio.currentTime = Math.max(0, audio.currentTime + s); 
+function seekPlayback(position) {
+    if (!Number.isFinite(position)) return;
+    playbackEnded = false;
+    const end = Number.isFinite(audio.duration) ? audio.duration : Infinity;
+    androidRestorePosition = null;
+    audio.currentTime = Math.min(end,Math.max(0,position));
+    reconcilePlayback();
+}
+function reconcilePlayback() {
+    if (!nowPlaying || !wantsPlayback || playbackEnded) return;
+    if (!canPlayWithSubtitles()) {
+        waitingForSubtitles = true;
+        audio.pause();
+    } else if (waitingForSubtitles) {
+        playWhenReady();
+    }
+}
+function skipAudio(s) {
+    seekPlayback(audio.currentTime + s);
 }
 
 function seekAudio(e) {
     const bar = e.currentTarget;
     const pct = (e.clientX - bar.getBoundingClientRect().left) / bar.offsetWidth;
-    if (audio.duration) audio.currentTime = pct * audio.duration;
+    if (Number.isFinite(audio.duration)) seekPlayback(pct * audio.duration);
 }
 
 audio.ontimeupdate = () => {
     if (androidRestorePosition !== null && audio.currentTime >= androidRestorePosition - .1) androidRestorePosition = null;
     if (Date.now() - androidStateSavedAt > 2000) { saveAndroidPlaybackState(); androidStateSavedAt = Date.now(); }
-    if (!audio.duration) return;
+    // Apply the loop before deciding whether the final position needs subtitles.
+    if (loopOn && loopA !== null && loopB !== null && audio.currentTime >= loopB) seekPlayback(loopA);
+    reconcilePlayback();
+    if (!Number.isFinite(audio.duration) || !audio.duration) return;
     const pct = (audio.currentTime / audio.duration) * 100;
     const fill = document.getElementById('progFill');
     if (fill) fill.style.width = pct + '%';
@@ -2182,19 +2289,28 @@ audio.ontimeupdate = () => {
         setBadge(isTranscribing ? '等待后续字幕…' : '字幕未完成，请刷新重试', 'rgba(245,158,11,.15)', '#fbbf24', 'rgba(245,158,11,.3)');
     }
 
-    // A-B loop enforcement
-    if (loopOn && loopA !== null && loopB !== null && audio.currentTime >= loopB) {
-        audio.currentTime = loopA;
-    }
 };
+audio.onseeked = () => reconcilePlayback();
 
 audio.onloadedmetadata = () => {
     if (androidRestorePosition !== null) {
         audio.currentTime = Math.min(androidRestorePosition,Number.isFinite(audio.duration) ? audio.duration : androidRestorePosition);
         androidRestorePosition = null;
     }
+    playWhenReady();
 };
-audio.onended = () => setPlayIcon(false);
+audio.onerror = () => { if (audio.error?.code === 2) scheduleAudioRecovery(); };
+audio.onstalled = () => scheduleAudioRecovery(true);
+audio.onended = () => {
+    if (loopOn && loopA !== null && loopB !== null && wantsPlayback) {
+        seekPlayback(loopA); playWhenReady(); return;
+    }
+    playbackEnded = true;
+    wantsPlayback = waitingForSubtitles = false;
+    clearAudioRecovery();
+    setPlayIcon(false);
+    saveAndroidPlaybackState();
+};
 audio.onpause = () => setPlayIcon(false);
 audio.onplay  = () => setPlayIcon(true);
 
@@ -2278,7 +2394,7 @@ function toggleLoop() {
     if (loopOn) {
         btn.classList.add('loop-on');
         btn.innerHTML = '<i class="fa-solid fa-repeat"></i> Loop ON';
-        audio.currentTime = loopA;
+        seekPlayback(loopA);
         toast(`循环中: ${ft(loopA)} → ${ft(loopB)}`, 'info');
     } else {
         btn.classList.remove('loop-on');
@@ -2379,7 +2495,9 @@ function triggerAiTranscribe(auto = false, resume = false) {
         const stream = new EventSource(url);
         subtitleStream = stream;
         let lastActivity = Date.now();
+        subtitleLastActivity = lastActivity;
         let lastAdvance = Date.now();
+        let decodedUntil = -1;
         subtitleWatchdog = setInterval(() => {
             if (request !== subtitleRequest || stream !== subtitleStream) return;
             if (Date.now() - lastActivity > 45000 || Date.now() - lastAdvance > 180000) fail('字幕连接或转写进度停滞，正在从断点恢复。');
@@ -2387,10 +2505,17 @@ function triggerAiTranscribe(auto = false, resume = false) {
         stream.onmessage = (e) => {
             if (request !== subtitleRequest || stream !== subtitleStream) return;
             lastActivity = Date.now();
+            subtitleLastActivity = lastActivity;
             let data;
             try { data = JSON.parse(e.data); }
             catch { fail('响应格式异常，请重试。'); return; }
             if (data.status === 'heartbeat') return;
+            if (data.status === 'decode_progress') {
+                if (Number.isFinite(data.until) && data.until > decodedUntil) {
+                    decodedUntil = data.until; lastAdvance = Date.now();
+                }
+                return;
+            }
             if (data.status === 'resumed') {
                 if (!Number.isFinite(data.until) || !Array.isArray(data.cues)) { fail('断点数据无效'); return; }
                 cues = data.cues.filter(c => c && Number.isFinite(c.start) && Number.isFinite(c.end) && c.end > c.start && typeof c.text === 'string');
@@ -2469,21 +2594,32 @@ function setBadge(text, bg, color, border) {
 // ══════════════════════════════════════════════
 //  RENDER SUBTITLES & CHECKBOX SELECTION
 // ══════════════════════════════════════════════
+let renderedSubtitleRequest = -1;
+let renderedSubtitleMarkup = [];
 function renderSubs() {
     updateAiAvailability();
     updateSubtitleTranslationButton();
     const el = document.getElementById('subScroll');
     if (!el) return;
     if (!cues.length) {
+        renderedSubtitleMarkup = [];
+        renderedSubtitleRequest = -1;
         el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3);font-size:12px">字幕加载中，耐心等待</div>';
         return;
     }
-    let h = '';
-    savedCues = new Set(cues.flatMap((c, i) => notebook.some(n => n.epUrl === nowPlaying.url && Math.abs(n.start - c.start) < 0.5) ? [i] : []));
+    const markup = [];
+    const savedStarts = notebook.filter(n => n.epUrl === nowPlaying.url).map(n => n.start).sort((a,b)=>a-b);
+    const isSaved = start => {
+        let low=0,high=savedStarts.length;
+        while(low<high){const mid=(low+high)>>1;if(savedStarts[mid]<start-.5)low=mid+1;else high=mid;}
+        return low<savedStarts.length && Math.abs(savedStarts[low]-start)<.5
+            || low+1<savedStarts.length && Math.abs(savedStarts[low+1]-start)<.5;
+    };
+    savedCues = new Set(cues.flatMap((c,i)=>isSaved(c.start)?[i]:[]));
     cues.forEach((c, i) => {
         const saved = savedCues.has(i);
         const isChecked = selectedCues.has(i);
-        h += `<div class="sub-line ${isChecked ? 'selected' : ''}" id="cue-${i}" onclick="jumpTo(${c.start})">
+        markup.push(`<div class="sub-line ${isChecked ? 'selected' : ''}" id="cue-${i}" data-cue-start="${c.start}">
             <input type="checkbox" class="cue-check" data-idx="${i}" ${isChecked ? 'checked' : ''} onclick="event.stopPropagation()" onchange="onCueCheckChange(${i}, this.checked)" title="勾选送入 AI 提问框">
             <span class="sub-ts">${ft(c.start)}</span>
             <span class="sub-txt">${wordSpans(c.text, i)}${subtitleTranslationEnabled && subtitleTranslations.has(subtitleTranslationKey(c)) ? `<span class="sub-translation">${escHtml(subtitleTranslations.get(subtitleTranslationKey(c)))}</span>` : ''}</span>
@@ -2495,9 +2631,23 @@ function renderSubs() {
                 onclick="saveSentence(event,${i})" title="${saved ? '已收藏，点击取消收藏' : '收藏到笔记本'}" aria-label="${saved ? '取消收藏这句字幕' : '收藏这句字幕'}" aria-pressed="${saved}">
                 <i class="fa-${saved ? 'solid' : 'regular'} fa-bookmark" aria-hidden="true"></i>
             </button></div>
-        </div>`;
+        </div>`);
     });
-    el.innerHTML = h;
+    if (!el.insertAdjacentHTML || renderedSubtitleRequest !== subtitleRequest || !renderedSubtitleMarkup.length
+        || markup.length < renderedSubtitleMarkup.length) {
+        el.innerHTML = markup.join('');
+    } else {
+        for(let i=0;i<renderedSubtitleMarkup.length;i++) {
+            if(markup[i]!==renderedSubtitleMarkup[i]) {
+                const row=document.getElementById(`cue-${i}`);
+                if(row)row.outerHTML=markup[i];
+            }
+        }
+        if(markup.length>renderedSubtitleMarkup.length)el.insertAdjacentHTML('beforeend',markup.slice(renderedSubtitleMarkup.length).join(''));
+    }
+    renderedSubtitleRequest=subtitleRequest;
+    renderedSubtitleMarkup=markup;
+    if (activeCue >= 0) document.getElementById(`cue-${activeCue}`)?.classList.add('active');
     translateAvailableSubtitles();
 }
 
@@ -2538,12 +2688,12 @@ function wordSpans(text, cueIdx) {
         if (/^\s+$/.test(tok)) return tok;
         const word = tok.replace(/[^a-zA-Z'']/g, '');
         if (!word || word.length < 2) return `<span>${escHtml(tok)}</span>`;
-        return `<span class="word" onclick="lookupWord('${escQ(word.toLowerCase())}',event,${cueIdx})">${escHtml(tok)}</span>`;
+        return `<span class="word" data-word="${escHtml(word.toLowerCase())}" data-cue-index="${cueIdx}">${escHtml(tok)}</span>`;
     }).join('');
 }
 
 function jumpTo(secs) {
-    audio.currentTime = secs;
+    seekPlayback(secs);
     wantsPlayback = true;
     playWhenReady();
 }
@@ -2571,6 +2721,7 @@ function syncSubs(t) {
 //  CUE SELECTION & AI INTEGRATION
 // ══════════════════════════════════════════════
 function onCueCheckChange(idx, checked) {
+    cueSelectionVersions.set(idx, ++cueSelectionRevision);
     if (checked) {
         selectedCues.add(idx);
     } else {
@@ -2582,6 +2733,7 @@ function onCueCheckChange(idx, checked) {
 }
 
 function clearSelectedCues() {
+    for (const idx of selectedCues) cueSelectionVersions.set(idx, ++cueSelectionRevision);
     selectedCues.clear();
     document.querySelectorAll('.cue-check').forEach(cb => cb.checked = false);
     document.querySelectorAll('.sub-line.selected').forEach(l => l.classList.remove('selected'));
@@ -2678,11 +2830,19 @@ async function sendAiQuestion() {
     // Disable button
     const btn = document.getElementById('aiSendBtn');
     aiSending = true;
+    const epoch = ++aiRequestEpoch;
+    const episode = nowPlaying;
+    const selection = new Set(selectedCues);
+    const selectionVersions = new Map([...selection].map(idx=>[idx,cueSelectionVersions.get(idx)]));
+    const controller = new AbortController();
+    aiRequestController = controller;
+    const timeout = setTimeout(() => controller.abort(),180000);
     updateAiAvailability();
 
     try {
         const res = await fetch('/api/ask', {
             method: 'POST',
+            signal:controller.signal,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 question: question,
@@ -2693,6 +2853,7 @@ async function sendAiQuestion() {
             })
         });
         const data = await res.json();
+        if (epoch !== aiRequestEpoch || episode !== nowPlaying) return;
         removeChatLoading(loadingId);
         if (data.status === 'success') {
             appendChatMessage('ai', data.answer);
@@ -2700,12 +2861,21 @@ async function sendAiQuestion() {
             appendChatMessage('ai', '⚠️ ' + (data.message || data.detail || '提问失败，请稍后重试。'));
         }
     } catch (e) {
+        if (epoch !== aiRequestEpoch || episode !== nowPlaying) return;
         removeChatLoading(loadingId);
-        appendChatMessage('ai', '⚠️ 网络连接异常: ' + e.message);
+        appendChatMessage('ai', e.name === 'AbortError' ? '⚠️ 助教回复超时，请重试。' : '⚠️ 网络连接异常: ' + e.message);
     } finally {
-        aiSending = false;
-        updateAiAvailability();
-        clearSelectedCues();
+        clearTimeout(timeout);
+        if (epoch === aiRequestEpoch && episode === nowPlaying) {
+            aiSending = false;
+            aiRequestController = null;
+            for (const idx of selection) {
+                if (cueSelectionVersions.get(idx) === selectionVersions.get(idx)) selectedCues.delete(idx);
+            }
+            renderSubs();
+            updateCueSelectionUI();
+            updateAiAvailability();
+        }
     }
 }
 
@@ -2746,6 +2916,8 @@ function removeChatLoading(id) {
 }
 
 function clearAiChat() {
+    cancelAiQuestion();
+    updateAiAvailability();
     const list = document.getElementById('aiMessages');
     if (list) {
         list.innerHTML = aiWelcomeDismissedForProcess ? '' : `<div class="ai-welcome-card" data-ai-welcome="true">
@@ -3021,11 +3193,11 @@ function renderNotebook() {
     }
 
     list.innerHTML = notebook.map(n => {
-        return `<div class="nb-entry" onclick="jumpFromNotebook('${escQ(n.epUrl)}',${n.start})">
+        return `<div class="nb-entry" data-notebook-url="${escHtml(n.epUrl)}" data-notebook-start="${Number(n.start)}">
             <div class="nb-text">"${escHtml(n.text)}"</div>
             <div class="nb-meta">
                 <span>${escHtml(n.show)} · ${ft(n.start)}</span>
-                <button class="nb-del" onclick="deleteNb(event,${n.id})"><i class="fa-solid fa-xmark"></i></button>
+                <button class="nb-del" data-notebook-delete="${Number(n.id)}"><i class="fa-solid fa-xmark"></i></button>
             </div>
         </div>`;
     }).join('');
@@ -3033,7 +3205,7 @@ function renderNotebook() {
 
 function jumpFromNotebook(epUrl, startTime) {
     if (nowPlaying && nowPlaying.url === epUrl) {
-        audio.currentTime = startTime;
+        seekPlayback(startTime);
         wantsPlayback = true;
         playWhenReady();
         showTab('plaza');

@@ -9,6 +9,7 @@ import shutil
 import aliyun
 import corrections
 import subtitle_translation
+import cache_policy
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -48,6 +49,11 @@ STATIC_DIR = os.path.join(BASE_DIR, "static")
 os.makedirs(STATIC_DIR, exist_ok=True)
 
 app.mount("/cache", StaticFiles(directory=CACHE_DIR), name="cache")
+
+@app.on_event("startup")
+async def trim_old_caches():
+    # At server startup no episode workers are running yet.
+    await asyncio.to_thread(cache_policy.prune,CACHE_DIR)
 
 SETTINGS_PATH = os.path.join(BASE_DIR, ".env")
 settings_lock = threading.Lock()

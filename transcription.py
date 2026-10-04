@@ -162,6 +162,7 @@ def _transcript_events(audio_url, transcript_url, force_refresh, cache_dir, prox
         if vtt_path.exists() and audio_path.exists() and audio_path.stat().st_size and not force_refresh:
             content = vtt_path.read_text(encoding="utf-8")
             if content.startswith("WEBVTT") and "-->" in content:
+                vtt_path.touch(); audio_path.touch()
                 yield {"status": "cached", "vtt": content, "local_audio": f"/cache/{key}.mp3"}
                 return
 
