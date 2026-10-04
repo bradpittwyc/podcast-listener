@@ -16,13 +16,13 @@ Android 播放控制栏的 Loop 同排提供「分享字幕」，使用系统 Sh
 
 图标以 Web 中央的 `fa-headphones-simple` 欢迎图标为原稿。运行 `python android/export_brand_icon.py`（需要 fonttools、Playwright 和 Edge）直接读取 Web 样式与随包字体，导出启动图和各密度桌面图；自适应图标使用字体的原始轮廓，并提供独立背景及单色通知图。手机桌面的外形由系统图标遮罩决定；启动画面保持 Web 的圆角卡片。不要使用整张用户截图或手绘轮廓替代原稿。
 
-切换节目或重连时通过任务 ID 明确取消旧转写，包括单句重新生成；立即关闭关联的云端连接和解码音频下载。取消请求先于任务启动到达也有效。音频结束后显示收尾状态，确认完成即关闭字幕流并停止自动重连；单段任务有独立的最长处理时限，不会因心跳无限延长。连续失败最多自动重试 5 次，每次播放累计最多重试 20 次，之后需手动继续。
+切换节目或重连时通过任务 ID 明确取消旧转写，包括单句重新生成；立即关闭关联的云端连接和解码音频下载。取消请求先于任务启动到达也有效。音频结束后显示收尾状态，确认完成即关闭字幕流并停止自动重连；实时连接保留接收空闲超时、上传积压超时及结束后 45 秒收尾超时。连续失败最多自动重试 5 次，每次播放累计最多重试 20 次，之后需手动继续。
 
 Web 保留 SRT、VTT 和 TXT 导出，同位置提供打印预览，自动收集节目标题、作者、简介、音频来源、整理时间、字幕状态和时间戳，按 A4 分页，可打印或保存 PDF。
 
 设置里的「查词模型」默认自动路由：每次查词检测当前 VPN / 系统 HTTP 代理，开启时调用 Gemini，关闭时调用 Qwen；无需重启。也可手动固定 Qwen 或 Gemini。Qwen 使用 `qwen-flash` 非思考模式和 JSON 输出，复用两把阿里云 Key 并交替查词；选择保存在设备加密配置中。AI 助教默认使用阿里云 Qwen，可在设置中的「助教模型」切换为 Gemini。北京地域的 ASR 和 Qwen 查词同时绑定底层网络的 DNS 与 Socket，不受全局代理路由影响（VPN 需允许绕过）。代理开启不代表 Gemini 一定可访问；连接或权限错误正常提示。
 
-MediaExtractor / MediaCodec 持续解码为 16 kHz 单声道 PCM，每约 100 毫秒通过 OkHttp WebSocket 上传 `qwen-audio-3.1-asr-flash-streaming`。前 5 分钟每 30 秒一个任务，之后逐渐延长。两把 Key 交替，最多两个任务并行；词时间戳按句末标点合并，未完成句子及断点原子保存。断线从断点继续，不重新上传已完成范围。
+本试验分支从 `4937748` 创建。MediaExtractor / MediaCodec 持续解码为 16 kHz 单声道 PCM，每约 100 毫秒按实时速度通过一个 OkHttp WebSocket 上传 `qwen-audio-3.1-asr-flash-streaming`。固定使用 Key 1（包括单句重新识别），不定时切段、不轮换 Key、不并行整集任务。仅在音频结束时发送 finish-task，断线从已保存的断点新建连接恢复。词时间戳按句末标点合并，未完成句子及断点原子保存。沿用设备已有地域和对应 Key 1；Key 2 保留供查词等功能使用。试验字幕使用独立的 qwen-single-realtime-v1 缓存，保留原有字幕缓存及单句修正。手机不使用 FFmpeg。
 
 每句的旋转箭头可重新识别单句，解码到该句结束即停止，上传范围限该句及少量上下文。修正单独保存，后台和缓存不会覆盖它。失败保留原文。助教在首条字幕到达后即可使用，携带发送时已获得的全部字幕（含修正）、学习提示词、用户输入和勾选例句；转写仍在进行时，提示模型仅依据当前内容回答。
 
@@ -35,10 +35,12 @@ MediaExtractor / MediaCodec 持续解码为 16 kHz 单声道 PCM，每约 100 �
 ```powershell
 gradle -p android assembleDebug testDebugUnitTest
 adb devices -l
-python android/install.py 设备序列号
+adb -s 设备序列号 install --no-streaming -r android/app/build/outputs/apk/debug/app-debug.apk
+adb -s 设备序列号 shell am force-stop com.podcastlearner.tablet
+adb -s 设备序列号 shell am start -n com.podcastlearner.tablet/.MainActivity
 ```
 
-安装脚本将电脑 `.env` 的两把阿里云 Key、地域和 Gemini Key 注入设备私有目录，不打印密钥。应用导入后用 Android Keystore AES-GCM 加密保存并删除临时明文；设置页也使用加密存储。脚本移除旧 USB 转发。
+试验更新使用上面的覆盖安装命令，保留手机已有设置与加密密钥。首次配置才使用安装脚本；安装脚本将电脑 `.env` 的两把阿里云 Key、地域和 Gemini Key 注入设备私有目录，不打印密钥。应用导入后用 Android Keystore AES-GCM 加密保存并删除临时明文；设置页也使用加密存储。脚本移除旧 USB 转发。
 
 APK：`android/app/build/outputs/apk/debug/app-debug.apk`。Web 和 Android 使用各自缓存；阿里云缓存与旧 Groq 缓存分开。
 

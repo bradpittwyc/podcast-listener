@@ -3301,6 +3301,11 @@ function toast(msg, type = 'info') {
 const apiKeyInputs = {gemini_key:'geminiKey',aliyun_key_1:'aliyunKey1',aliyun_key_2:'aliyunKey2'};
 function applyProviderSettings(options = {}) {
     document.getElementById('subtitleProvider').value = 'aliyun';
+    if (isAndroidPlayback()) {
+        document.querySelector('#subtitleProvider option[value="aliyun"]').textContent = '阿里云 Qwen · 单 Key 实时';
+        document.querySelector('label[for="aliyunKey1"]').textContent = '阿里云百炼 API Key 1（实时转写）';
+        document.querySelector('label[for="aliyunKey2"]').textContent = '阿里云百炼 API Key 2（查词等功能）';
+    }
     document.getElementById('aliyunRegion').value = options.aliyun_region || 'beijing';
     document.getElementById('dictionaryProvider').value = options.dictionary_provider || 'auto';
     const translation = options.translation_provider || 'gemini';

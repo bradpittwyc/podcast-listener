@@ -463,8 +463,7 @@ public final class NativeBackend implements AutoCloseable {
         AtomicFile overrides=corrections(url);JSONArray previous=load(overrides).optJSONArray("cues");
         if(previous!=null)for(int i=0;i<previous.length();i++){JSONObject cue=previous.getJSONObject(i);
             if(Math.abs(cue.getDouble("start")-start)<.002&&Math.abs(cue.getDouble("end")-end)<.002){start=cue.getDouble("source_start");end=cue.getDouble("source_end");break;}}
-        List<String> keys=new ArrayList<>();for(String name:new String[]{"aliyun_key_1","aliyun_key_2"}){String key=credentials.optString(name);if(!key.isEmpty()&&!keys.contains(key))keys.add(key);}
-        if(keys.isEmpty())throw new AliyunStream.Failure("请在设置中填写阿里云百炼 Key。",false);
+        List<String> keys=Collections.singletonList(transcriptionKey(credentials));
         JSONArray recognized=new JSONArray();final double from=start,to=end;
         String token=TranscriptionJobs.token(request.body.optString("request_id"));
         TranscriptionJobs.Control control=transcriptionJobs.register(token);
@@ -494,7 +493,7 @@ public final class NativeBackend implements AutoCloseable {
     }
     private AtomicFile checkpoint(String url) throws Exception {
         byte[] digest=MessageDigest.getInstance("SHA-256").digest(bytes(url));StringBuilder name=new StringBuilder();for(byte value:digest)name.append(String.format("%02x",value&255));
-        File folder=new File(context.getFilesDir(),"transcripts");folder.mkdirs();return new AtomicFile(new File(folder,name+"-aliyun-sentences-v2.json"));
+        File folder=new File(context.getFilesDir(),"transcripts");folder.mkdirs();return new AtomicFile(new File(folder,name+"-qwen-single-realtime-v1.json"));
     }
     private JSONObject load(AtomicFile file) {try{return new JSONObject(new String(read(file.openRead(),12*1024*1024),StandardCharsets.UTF_8));}catch(Exception e){return new JSONObject();}}
     private void store(AtomicFile file,JSONObject value) throws Exception {
@@ -521,13 +520,12 @@ public final class NativeBackend implements AutoCloseable {
                     if(content.startsWith("WEBVTT")&&content.contains("-->")){events.send(object("status","official","vtt",content));return;}
                 } catch(Exception ignored){}
             }
-            List<String> keys=new ArrayList<>();for(String name:new String[]{"aliyun_key_1","aliyun_key_2"}){String key=credentials.optString(name).trim();if(!key.isEmpty()&&!keys.contains(key))keys.add(key);}
-            if(keys.isEmpty()){events.send(object("status","error","detail","字幕服务未配置，请检查设置","retryable",false));return;}
+            List<String> keys=Collections.singletonList(transcriptionKey(credentials));
             double until=state.optDouble("until",0);int index=state.optInt("next_chunk",0);
             JSONObject fragment=state.optJSONObject("pending_sentence");
             double coverage=fragment==null?until:(cues.length()==0?0:cues.getJSONObject(cues.length()-1).getDouble("end"));
             events.send(object("status","resumed","until",coverage,"cues",cues));
-            events.send(object("status","progress","detail","设备正在解码，首段字幕就绪后播放"));
+            events.send(object("status","progress","detail","单 Key 实时转写，首条字幕就绪后播放"));
             decode(url,until,index,cues,fragment,keys,file,events);
         } catch(Exception error) {
             if(!events.stopped.get())try {Throwable cause=error;while(cause.getCause()!=null)cause=cause.getCause();boolean retryable=cause instanceof AliyunStream.Failure?((AliyunStream.Failure)cause).retryable:(!(cause instanceof CloudError)||((CloudError)cause).status==429||((CloudError)cause).status>=500);
@@ -537,7 +535,11 @@ public final class NativeBackend implements AutoCloseable {
     private static String time(double seconds) {long millis=Math.round(seconds*1000);return String.format(Locale.US,"%02d:%02d:%02d.%03d",millis/3600000,(millis/60000)%60,(millis/1000)%60,millis%1000);}
     private static String vtt(JSONArray cues) throws Exception {StringBuilder result=new StringBuilder("WEBVTT\n\n");for(int i=0;i<cues.length();i++){JSONObject cue=cues.getJSONObject(i);result.append(time(cue.getDouble("start"))).append(" --> ").append(time(cue.getDouble("end"))).append('\n').append(cue.getString("text")).append("\n\n");}return result.toString();}
 
-    private double length(double offset) {return offset<300?Math.min(30,300-offset):offset<900?Math.min(120,900-offset):300;}
+    static String transcriptionKey(JSONObject config) throws AliyunStream.Failure {
+        String key=config.optString("aliyun_key_1").trim();
+        if(key.isEmpty())throw new AliyunStream.Failure("请在设置中填写阿里云百炼 Key 1，实时转写固定使用这一把密钥。",false);
+        return key;
+    }
     private class StreamingPipeline implements AutoCloseable {
         final ArrayDeque<AliyunStream> tasks=new ArrayDeque<>();
         final JSONArray cues;final List<String> keys;final AtomicFile file;final Events events;final String region;
@@ -573,15 +575,10 @@ public final class NativeBackend implements AutoCloseable {
             if(events.stopped.get()||closed)throw new IOException("Cancelled");
             drain(false);
             if(current==null){
-                while(tasks.size()>=keys.size()){drain(true);if(events.stopped.get()||closed)throw new IOException("Cancelled");}
-                current=new AliyunStream(aliyunClient(region),keys.get(index%keys.size()),region,offset,index,events.control);tasks.add(current);
+                current=new AliyunStream(aliyunClient(region),keys.get(0),region,offset,index,events.control);tasks.add(current);
                 current.windowStart=windowStart;current.windowEnd=windowEnd;
             }
-            // Split a PCM frame exactly at the task boundary, including resumed offsets.
-            int available=Math.max(2,(int)Math.round((length(offset)-current.duration)*32000));available-=available%2;
-            if(pcm.length>available){send(Arrays.copyOfRange(pcm,0,available));send(Arrays.copyOfRange(pcm,available,pcm.length));return;}
             current.send(pcm);
-            if(current.duration>=length(offset)-.00001){current.finish();offset+=current.duration;index++;current=null;}
             drain(false);
         }
         void finish() throws Exception {

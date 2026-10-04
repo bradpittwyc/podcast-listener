@@ -33,7 +33,6 @@ final class AliyunStream implements AutoCloseable {
     private final Set<String> seen = new HashSet<>();
     private final WebSocket socket;
     private Runnable removeCancel=()->{};
-    private final long deadline;
 
     static final class Failure extends IOException {
         final boolean retryable;
@@ -52,8 +51,6 @@ final class AliyunStream implements AutoCloseable {
     }
     AliyunStream(OkHttpClient client, String key, String region, double offset, int index,TranscriptionJobs.Control control) throws Exception {
         this.offset = offset; this.index = index;
-        double seconds=offset<300?30:offset<900?120:300;
-        deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos((long)(seconds/5+120));
         if(control.stopped.get())throw new IOException("Cancelled");
         String host = region.equals("singapore") ? "dashscope-intl.aliyuncs.com" : "dashscope.aliyuncs.com";
         Request request = new Request.Builder().url("wss://" + host + "/api-ws/v1/inference")
@@ -122,7 +119,7 @@ final class AliyunStream implements AutoCloseable {
         }
         duration += pcm.length / 32000.0;
         if (!socket.send(ByteString.of(pcm))) throw new Failure("阿里云音频上传中断。", true);
-        Thread.sleep(Math.max(1, pcm.length / 160)); // At most 5x audio speed, like Web.
+        Thread.sleep(Math.max(1, pcm.length / 32)); // Stream 16 kHz mono PCM at real-time speed.
     }
     void finish() throws Exception {
         if(finishStarted!=0)return;
@@ -134,7 +131,6 @@ final class AliyunStream implements AutoCloseable {
         if (closed.get()) throw new IOException("Cancelled");
         if (failure != null) throw failure;
         long now = System.nanoTime();
-        if(now>deadline)throw new Failure("阿里云单段转写超过时限，正在从断点重连。",true);
         if (now - lastEvent > TimeUnit.SECONDS.toNanos(90) || (finishStarted != 0 && now - finishStarted > TimeUnit.SECONDS.toNanos(45)))
             throw new Failure("阿里云转写超时，正在从断点重连。", true);
     }

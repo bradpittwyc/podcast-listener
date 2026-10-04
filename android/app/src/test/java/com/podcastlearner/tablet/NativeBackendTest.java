@@ -6,6 +6,22 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class NativeBackendTest {
+    @Test public void realtimeTranscriptionAlwaysUsesKeyOne() throws Exception {
+        org.json.JSONObject config=NativeBackend.object("aliyun_key_1"," first-key ","aliyun_key_2","second-key");
+        assertEquals("first-key",NativeBackend.transcriptionKey(config));
+        config.put("aliyun_key_2","another-key");
+        assertEquals("first-key",NativeBackend.transcriptionKey(config));
+    }
+    @Test public void realtimeTranscriptionDoesNotFallBackToKeyTwo() throws Exception {
+        try {
+            NativeBackend.transcriptionKey(NativeBackend.object("aliyun_key_1"," ","aliyun_key_2","private-second-key"));
+            fail("Missing Key 1 should require configuration");
+        } catch(AliyunStream.Failure error) {
+            assertFalse(error.retryable);
+            assertTrue(error.getMessage().contains("Key 1"));
+            assertFalse(error.getMessage().contains("private-second-key"));
+        }
+    }
     @Test public void tutorAllowsPlainTextWhileDictionaryAndTranslationRequestJson() throws Exception {
         org.json.JSONObject tutor=NativeBackend.qwenPayload("Explain the subtitles",false);
         assertFalse(tutor.has("response_format"));
