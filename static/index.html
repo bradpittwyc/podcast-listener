@@ -1952,7 +1952,6 @@ function triggerAiTranscribe(auto = false, resume = false) {
     transcriptionJobId = jobId;
     isTranscribing = true;
     subtitlesComplete = false;
-    updateAiAvailability();
     if (!resume) {
         coveredUntil = 0;
         cues = [];
@@ -1960,6 +1959,7 @@ function triggerAiTranscribe(auto = false, resume = false) {
         waitingForSubtitles = wantsPlayback;
         audio.pause();
     }
+    updateAiAvailability();
     const btn = document.getElementById('refreshBtn');
     if (btn) btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 转写中...';
     const subScr = document.getElementById('subScroll');
@@ -2044,6 +2044,7 @@ function triggerAiTranscribe(auto = false, resume = false) {
             } else if (data.status === 'cue') {
                 const cue = data.cue;
                 if (cue && Number.isFinite(cue.start) && Number.isFinite(cue.end) && cue.end > cue.start && typeof cue.text === 'string' && !cues.some(c => c.start === cue.start && c.end === cue.end && c.text === cue.text)) cues.push(cue);
+                updateAiAvailability();
             } else if (data.status === 'chunk_ready') {
                 if (!Number.isFinite(data.until)) { fail('字幕进度无效'); return; }
                 if (data.until > coveredUntil) reconnectAttempts = 0;
@@ -2225,7 +2226,8 @@ function updateCueSelectionUI() {
 }
 
 function quickAsk(type) {
-    if (!subtitlesComplete || aiSending) { toast('请等待全篇字幕完成后提问', 'info'); return; }
+    if (aiSending) return;
+    if (!nowPlaying || !cues.length) { toast('请等待首条字幕就绪后提问', 'info'); return; }
     const aiInput = document.getElementById('aiInput');
     if (!aiInput) return;
     const quotes = getSelectedQuotesText();
@@ -2251,23 +2253,25 @@ function handleAiKey(e) {
 }
 
 function updateAiAvailability() {
-    const ready = !!nowPlaying && subtitlesComplete && cues.length > 0;
+    const ready = !!nowPlaying && cues.length > 0;
+    const shareReady = ready && subtitlesComplete;
     const shareBtn = document.getElementById('subtitleShareBtn');
     if (shareBtn) {
-        shareBtn.disabled = !ready;
-        shareBtn.title = ready ? '分享整集字幕 TXT 文件' : '请等待整集字幕生成完成';
+        shareBtn.disabled = !shareReady;
+        shareBtn.title = shareReady ? '分享整集字幕 TXT 文件' : '请等待整集字幕生成完成';
     }
     const btn = document.getElementById('aiSendBtn');
     if (btn) {
         btn.disabled = !ready || aiSending;
-        btn.title = ready ? '结合全篇字幕提问' : '请等待全篇字幕加载完成';
+        btn.title = ready ? '结合当前已获得的全部字幕提问' : '请等待首条字幕就绪';
     }
     document.querySelectorAll('.qtag').forEach(button => { button.disabled = !ready || aiSending; });
 }
 
 async function sendAiQuestion() {
-    if (!subtitlesComplete || !cues.length || aiSending) {
-        toast('请等待全篇字幕加载完成后再发送', 'info');
+    if (aiSending) return;
+    if (!nowPlaying || !cues.length) {
+        toast('请等待首条字幕就绪后再发送', 'info');
         return;
     }
     const input = document.getElementById('aiInput');

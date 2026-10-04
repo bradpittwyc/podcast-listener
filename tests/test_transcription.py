@@ -98,19 +98,38 @@ class TranscriptionTests(unittest.TestCase):
         path.write_text('{"version":1,"until":30,"next_chunk":1,"cues":[{"start":0,"end":99,"text":"bad"}]}')
         self.assertEqual(stt.read_checkpoint(path)['until'], 0)
 
-    def test_qa_requires_complete_transcript_and_awaits_full_context(self):
+    def test_qa_accepts_partial_transcript_and_awaits_all_available_context(self):
         client = Mock()
         client.aio.models.generate_content = AsyncMock(return_value=Mock(text='Answer'))
-        payload = {'question':'Explain', 'audio_url':self.url, 'full_transcript':'x' * 30000 + ' END_OF_EPISODE'}
+        payload = {'question':'Explain this expression', 'selected_text':'Selected example', 'audio_url':self.url,
+                   'full_transcript':'x' * 30000 + ' LAST_AVAILABLE_SENTENCE', 'transcript_complete':False}
+        _, _, vtt = stt.cache_paths(self.cache, self.url)
+        vtt.write_text('WEBVTT\n\n1\n00:00:00.000 --> 00:00:02.000\nUNSEEN_CACHE_TEXT\n', encoding='utf-8')
         with patch.object(app,'gemini_client',client), patch.object(app,'CACHE_DIR',str(self.cache)):
             api = TestClient(app.app)
-            rejected = api.post('/api/ask', json=payload)
-            self.assertEqual(rejected.status_code,409)
-            client.aio.models.generate_content.assert_not_called()
-            accepted = api.post('/api/ask', json={**payload,'transcript_complete':True})
+            accepted = api.post('/api/ask', json=payload)
         self.assertEqual(accepted.json()['status'],'success')
         client.aio.models.generate_content.assert_awaited_once()
-        self.assertIn(payload['full_transcript'],client.aio.models.generate_content.call_args.kwargs['contents'])
+        prompt = client.aio.models.generate_content.call_args.kwargs['contents']
+        self.assertIn(payload['full_transcript'], prompt)
+        self.assertIn(payload['question'], prompt)
+        self.assertIn(payload['selected_text'], prompt)
+        self.assertIn('专业、耐心的英语播客学习助教', prompt)
+        self.assertIn('可能尚未覆盖整集', prompt)
+        self.assertNotIn('UNSEEN_CACHE_TEXT', prompt)
+
+    def test_qa_complete_context_and_missing_subtitles(self):
+        client = Mock()
+        client.aio.models.generate_content = AsyncMock(return_value=Mock(text='Answer'))
+        with patch.object(app, 'gemini_client', client), patch.object(app, 'CACHE_DIR', str(self.cache)):
+            api = TestClient(app.app)
+            missing = api.post('/api/ask', json={'question':'Explain', 'audio_url':self.url})
+            self.assertEqual(missing.status_code, 409)
+            client.aio.models.generate_content.assert_not_called()
+            accepted = api.post('/api/ask', json={'question':'Explain', 'full_transcript':'Complete transcript.',
+                                                'transcript_complete':True})
+        self.assertEqual(accepted.json()['status'], 'success')
+        self.assertIn('整集字幕已完成', client.aio.models.generate_content.call_args.kwargs['contents'])
 
 
 if __name__ == "__main__":

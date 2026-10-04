@@ -268,23 +268,42 @@ test('permanent configuration errors do not auto-retry', () => {
     assert.equal(p.timers.filter(t => !t.cleared).length, 0);
 });
 
-test('chat is blocked before complete subtitles, then sends the whole transcript', async () => {
+test('chat sends all available subtitles and selected quotes before transcription completes', async () => {
     const p = player(); p.start();
     await p.run('sendAiQuestion()');
     assert.equal(p.fetchCalls.length, 0);
     const stream = p.streams[0];
-    stream.emit(cue(0,20)); stream.emit({status:'chunk_ready',until:30});
-    await p.run('sendAiQuestion()');
-    assert.equal(p.fetchCalls.length, 0);
-    stream.emit({status:'done'});
+    stream.emit(cue(0,20));
     assert.equal(p.elements.get('aiSendBtn').disabled, false);
+    assert.equal(p.elements.get('subtitleShareBtn').disabled, true);
+    stream.emit({status:'cue',cue:{start:30,end:45,text:'Corrected later sentence.'}});
+    p.run('selectedCues.add(1)');
     p.run("document.getElementById('aiInput').value = 'Summarize'");
     await p.run('sendAiQuestion()');
     const body = JSON.parse(p.fetchCalls[0][1].body);
-    assert.equal(body.transcript_complete, true);
-    assert.equal(body.full_transcript, 'Hello world');
+    assert.equal(body.transcript_complete, false);
+    assert.equal(body.full_transcript, 'Hello world Corrected later sentence.');
+    assert.equal(body.question, 'Summarize');
+    assert.match(body.selected_text, /Corrected later sentence\./);
+    stream.emit({status:'done'});
+    p.run("document.getElementById('aiInput').value = 'Summarize all'");
+    await p.run('sendAiQuestion()');
+    assert.equal(JSON.parse(p.fetchCalls[1][1].body).transcript_complete, true);
     p.start('https://example.com/next.mp3');
     assert.equal(p.elements.get('aiSendBtn').disabled, true);
+});
+
+test('quick questions and quote-only questions work during streaming', async () => {
+    const p = player(); p.start(); p.streams[0].emit(cue(0,20));
+    p.run('selectedCues.add(0)');
+    await p.run('sendAiQuestion()');
+    const body = JSON.parse(p.fetchCalls[0][1].body);
+    assert.equal(body.question, '');
+    assert.match(body.selected_text, /Hello world/);
+    p.run("quickAsk('语法拆解')");
+    const quickBody = JSON.parse(p.fetchCalls[1][1].body);
+    assert.match(quickBody.question, /语法结构/);
+    assert.equal(quickBody.transcript_complete, false);
 });
 
 test('single sentence retry preserves other cues, playback and manual pause', async () => {

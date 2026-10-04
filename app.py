@@ -422,7 +422,7 @@ def define_word(word: str = Query(..., min_length=1), context: str = ""):
 async def ask_podcast_ai(request: Request):
     """
     Use Gemini AI to answer user questions about the podcast or selected subtitle lines.
-    Automatically retrieves the full transcript from cache or client payload.
+    Uses the current subtitle snapshot from the client, with cache as a fallback.
     """
     if not gemini_client:
         return {"status": "error", "message": "GEMINI_API_KEY 环境变量未配置，请在 .env 中设置"}
@@ -434,8 +434,6 @@ async def ask_podcast_ai(request: Request):
 
     if not isinstance(body, dict) or any(not isinstance(body.get(name, ""), str) for name in ("question", "selected_text", "audio_url", "full_transcript")):
         raise HTTPException(status_code=400, detail="Invalid question fields")
-    if body.get("transcript_complete") is not True:
-        raise HTTPException(status_code=409, detail="请等待全篇字幕加载完成后再提问。")
 
     question = (body.get("question") or "").strip()
     selected_text = (body.get("selected_text") or "").strip()
@@ -445,9 +443,9 @@ async def ask_podcast_ai(request: Request):
     if not question and not selected_text:
         return {"status": "error", "message": "提问内容或勾选的字幕不能同时为空"}
 
-    # 1. 尝试从本地缓存读取全篇转写 VTT
-    transcript_text = ""
-    if audio_url:
+    # Prefer the user's current snapshot, including streamed cues and corrections.
+    transcript_text = client_transcript
+    if not transcript_text and audio_url:
         try:
             _, _, vtt_path = cache_paths(CACHE_DIR, audio_url)
             if vtt_path.exists():
@@ -462,19 +460,17 @@ async def ask_podcast_ai(request: Request):
         except Exception as e:
             print("Failed to read VTT cache for Q&A:", e)
 
-    # 2. 如果缓存中没有（比如正在流式转写中），使用前端传来的已就绪字幕全文
-    if not transcript_text and client_transcript:
-        transcript_text = client_transcript
-
     if not transcript_text:
-        raise HTTPException(status_code=409, detail="缺少完整字幕，请加载字幕后重试。")
-    # Include the whole completed transcript; never silently cut off its ending.
+        raise HTTPException(status_code=409, detail="尚未获得字幕，请等待首条字幕就绪后重试。")
+    # Include every available sentence without truncation.
     bg_context = transcript_text
+    transcript_status = "整集字幕已完成。" if body.get("transcript_complete") is True else "以下仅为当前已获得的全部字幕，可能尚未覆盖整集。请依据已提供内容回答，不要臆测尚未转写的内容。"
     quote_section = f"【用户勾选引用的字幕语句】:\n{selected_text}\n" if selected_text else ""
     user_query = question if question else "请详细解析上述勾选字幕句子的语法结构、生词习语和地道用法。"
 
     prompt = f"""你是一个专业、耐心的英语播客学习助教。
-用户正在边听播客边学习，并向你提问。以下是这期播客的字幕/转写全文背景：
+用户正在边听播客边学习，并向你提问。以下是发送时已获得的全部字幕/转写背景：
+{transcript_status}
 --- 播客背景转写 ---
 {bg_context}
 --- 背景结束 ---
@@ -486,7 +482,7 @@ async def ask_podcast_ai(request: Request):
 请结合播客的上下文，给出清晰、详实、通俗易懂的解答：
 1. 若涉及生词或短语：说明其在此处播客语境中的确切含义与地道用法，并给出生动的例句；
 2. 若涉及复杂句式或语法：拆解句子结构并进行通俗解释；
-3. 若询问播客内容或背景：结合转写全文进行提炼和解释。
+3. 若询问播客内容或背景：结合当前提供的全部转写内容进行提炼和解释。
 回答使用流畅自然的中文，可适当使用 Markdown 格式（粗体、列表、引用等），便于排版阅读。"""
 
     try:
