@@ -3,7 +3,7 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-    <application android:label="播客学伴" android:icon="@drawable/ic_podcast" android:allowBackup="false" android:usesCleartextTraffic="true" android:theme="@style/AppTheme">
+    <application android:label="播客学伴" android:icon="@drawable/ic_headphones" android:allowBackup="false" android:usesCleartextTraffic="true" android:theme="@style/AppTheme">
         <service android:name=".BackendService" android:exported="false" android:stopWithTask="false" android:foregroundServiceType="mediaPlayback" />
         <provider android:name=".SubtitleFileProvider" android:authorities="${applicationId}.subtitles" android:exported="false" android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/subtitle_share_paths" />
