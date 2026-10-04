@@ -175,8 +175,9 @@ public final class NativeBackend implements AutoCloseable {
         }
         if(r.path.equals("/api/retranscribe_sentence") && r.method.equals("POST")) { regenerate(r,output);return; }
         if(r.path.equals("/api/ask")) {
-            if(!r.body.optBoolean("transcript_complete") || r.body.optString("full_transcript").trim().isEmpty()) { response(output,409,"application/json",bytes(object("detail","请等待全篇字幕加载完成").toString()));return; }
-            String prompt="你是英语播客学习助教。以下是本期完整字幕，请结合全文推理、解释背景，以中文回答。\n【完整字幕】\n"+r.body.getString("full_transcript")+"\n【选中字幕】\n"+r.body.optString("selected_text")+"\n【问题】\n"+r.body.optString("question");
+            String prompt;
+            try { prompt=TutorPrompt.build(r.body); }
+            catch(IllegalArgumentException e) { response(output,400,"application/json",bytes(object("detail",e.getMessage()).toString()));return; }
             json(output,object("status","success","answer",gemini(prompt,false)));return;
         }
         if(r.path.equals("/api/define")) {

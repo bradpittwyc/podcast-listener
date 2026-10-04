@@ -268,23 +268,34 @@ test('permanent configuration errors do not auto-retry', () => {
     assert.equal(p.timers.filter(t => !t.cleared).length, 0);
 });
 
-test('chat is blocked before complete subtitles, then sends the whole transcript', async () => {
+test('chat sends all currently available corrected subtitles and selected quotes before completion', async () => {
     const p = player(); p.start();
     await p.run('sendAiQuestion()');
     assert.equal(p.fetchCalls.length, 0);
     const stream = p.streams[0];
-    stream.emit(cue(0,20)); stream.emit({status:'chunk_ready',until:30});
-    await p.run('sendAiQuestion()');
-    assert.equal(p.fetchCalls.length, 0);
-    stream.emit({status:'done'});
+    stream.emit(cue(0,20)); stream.emit(cue(20,30));stream.emit({status:'chunk_ready',until:30});
     assert.equal(p.elements.get('aiSendBtn').disabled, false);
-    p.run("document.getElementById('aiInput').value = 'Summarize'");
+    assert.equal(p.elements.get('subtitleShareBtn').disabled,true);
+    p.run("cues[0].text='Corrected example';selectedCues.add(0);document.getElementById('aiInput').value = 'Summarize'");
     await p.run('sendAiQuestion()');
     const body = JSON.parse(p.fetchCalls[0][1].body);
-    assert.equal(body.transcript_complete, true);
-    assert.equal(body.full_transcript, 'Hello world');
+    assert.equal(body.transcript_complete, false);
+    assert.equal(body.full_transcript, 'Corrected example Hello world');
+    assert.match(body.selected_text,/Corrected example/);
+    assert.equal(body.question,'Summarize');
     p.start('https://example.com/next.mp3');
-    assert.equal(p.elements.get('aiSendBtn').disabled, true);
+    assert.equal(p.elements.get('aiSendBtn').disabled, false);
+});
+
+test('chat accepts a question before the first subtitle and quick prompts during transcription', async () => {
+    const p=player();p.start();
+    p.run("document.getElementById('aiInput').value='What should I listen for?'");
+    await p.run('sendAiQuestion()');
+    assert.equal(JSON.parse(p.fetchCalls[0][1].body).full_transcript,'');
+    p.streams[0].emit(cue(0,20));
+    p.run("quickAsk('语法拆解')");
+    assert.equal(JSON.parse(p.fetchCalls[1][1].body).full_transcript,'Hello world');
+    assert.equal(JSON.parse(p.fetchCalls[1][1].body).transcript_complete,false);
 });
 
 test('single sentence retry preserves other cues, playback and manual pause', async () => {
@@ -317,9 +328,60 @@ test('Android recreation restores episode, position and manual pause from persis
     previous.audio.currentTime=17;previous.run('togglePlay();saveAndroidPlaybackState()');
     const restored=player(storage);restored.run('window.androidNativeRuntime=true;restoreAndroidPlaybackState()');
     assert.equal(restored.run('nowPlaying.url'),'https://example.com/one.mp3');
+    assert.equal(restored.audio.src, '/api/audio?url=https%3A%2F%2Fexample.com%2Fone.mp3');
     assert.equal(restored.audio.currentTime,17);assert.equal(restored.run('wantsPlayback'),false);
     restored.streams[0].emit({status:'resumed',until:30,cues:[{start:0,end:20,text:'Hello world'}]});
     assert.equal(restored.audio.paused,true);
+});
+
+test('Android starts with the native proxy before subtitle events, including official subtitles', () => {
+    const p = player();
+    // The bridge exists before MainActivity sets androidNativeRuntime.
+    p.run('window.PodcastAndroid = {}');
+    const url = 'https://example.com/episode.mp3?token=a&part=2';
+    p.start(url);
+    assert.equal(p.audio.src, '/api/audio?url=' + encodeURIComponent(url));
+    assert.equal(p.audio.playCount, 0);
+    p.streams[0].emit({status:'official',vtt:'WEBVTT\n\n00:00:00.000 --> 00:00:20.000\nHello world\n',local_audio:'/cache/audio.mp3'});
+    assert.equal(p.audio.src, '/api/audio?url=' + encodeURIComponent(url));
+    assert.equal(p.audio.paused, false);
+});
+
+test('Android restored playback keeps its proxy and position when resumed arrives before audio_source', () => {
+    const storage = new Map([['android_playback_state', JSON.stringify({
+        episode:{url:'https://example.com/one.mp3'},position:17,playing:true,speed:.75,volume:.6
+    })]]);
+    const p = player(storage);
+    let source, assignments = 0;
+    // Browser media resets when its source is assigned, even if it is the same URL.
+    Object.defineProperty(p.audio, 'src', {get(){return source;},set(value){source=value;assignments++;this.currentTime=0;this.paused=true;}});
+    p.run('window.androidNativeRuntime=true;restoreAndroidPlaybackState()');
+    assert.equal(source, '/api/audio?url=https%3A%2F%2Fexample.com%2Fone.mp3');
+    const stream = p.streams[0];
+    stream.emit({status:'resumed',until:30,cues:[{start:0,end:20,text:'Hello world'}]});
+    assert.equal(p.audio.currentTime,17);
+    assert.equal(p.audio.paused,false);
+    stream.emit({status:'audio_source',audio_url:source});
+    stream.emit({status:'audio_ready',local_audio:'/cache/audio.mp3'});
+    assert.equal(assignments,1);
+    assert.equal(p.audio.currentTime,17);
+    assert.equal(p.audio.paused,false);
+    assert.equal(p.audio.playbackRate,.75);
+});
+
+test('Android foreground recovery replaces a legacy direct URL at a nonzero position and preserves manual pause', () => {
+    const p = player();
+    p.run('window.androidNativeRuntime=true');p.start();
+    p.streams[0].emit(cue(0,20));p.streams[0].emit({status:'chunk_ready',until:30});
+    p.run('togglePlay()');
+    p.audio.src='https://example.com/one.mp3';p.audio.currentTime=12;
+    p.run('resumeAndroidPlayback()');
+    assert.equal(p.audio.src,'/api/audio?url=https%3A%2F%2Fexample.com%2Fone.mp3');
+    assert.equal(p.audio.currentTime,12);
+    assert.equal(p.run('wantsPlayback'),false);
+    p.streams[1].emit({status:'resumed',until:30,cues:[{start:0,end:20,text:'Hello world'}]});
+    assert.equal(p.audio.paused,true);
+    assert.equal(p.audio.currentTime,12);
 });
 
 test('Android foreground recovery resumes SSE without clearing cues or playback position', () => {
