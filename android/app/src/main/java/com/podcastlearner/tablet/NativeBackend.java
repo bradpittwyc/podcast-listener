@@ -71,12 +71,6 @@ public final class NativeBackend implements AutoCloseable {
         JSONObject result=new JSONObject(); for(int i=0;i<pairs.length;i+=2) result.put((String)pairs[i],pairs[i+1]); return result;
     }
     static String encode(String value) throws Exception { return URLEncoder.encode(value,"UTF-8"); }
-    static String studyPrompt(String transcript,String question,String selected,boolean complete) {
-        String query=question.trim().isEmpty()?"请详细解析勾选字幕句子的语法结构、生词习语和地道用法。":question;
-        return "你是专业、耐心的英语播客学习助教。请结合当前已获得的全部字幕和选中例句，以中文清晰、详实地解答用户的问题，可使用 Markdown。"
-            + (complete?"本期字幕已全部转写完成。":"本期字幕仍在转写，以下仅为当前已获得的全部内容；回答应基于这些内容，不要推测尚未获得的部分。")
-            + "\n【当前已获得的全部字幕】\n"+transcript+"\n【用户勾选的例句】\n"+selected+"\n【用户的问题】\n"+query;
-    }
     static byte[] bytes(String text) { return text.getBytes(StandardCharsets.UTF_8); }
     static byte[] read(InputStream input, int maximum) throws IOException {
         try(InputStream source=input; ByteArrayOutputStream result=new ByteArrayOutputStream()) {
@@ -182,8 +176,9 @@ public final class NativeBackend implements AutoCloseable {
         if(r.path.equals("/api/retranscribe_sentence") && r.method.equals("POST")) { regenerate(r,output);return; }
         if(r.path.equals("/api/ask")) {
             if(r.body.optString("full_transcript").trim().isEmpty()) { response(output,409,"application/json",bytes(object("detail","请等待首条字幕加载后提问").toString()));return; }
-            if(r.body.optString("question").trim().isEmpty() && r.body.optString("selected_text").trim().isEmpty()) { response(output,400,"application/json",bytes(object("detail","请输入问题或勾选字幕例句").toString()));return; }
-            String prompt=studyPrompt(r.body.getString("full_transcript"),r.body.optString("question"),r.body.optString("selected_text"),r.body.optBoolean("transcript_complete"));
+            String prompt;
+            try { prompt=TutorPrompt.build(r.body); }
+            catch(IllegalArgumentException e) { response(output,400,"application/json",bytes(object("detail",e.getMessage()).toString()));return; }
             json(output,object("status","success","answer",gemini(prompt,false)));return;
         }
         if(r.path.equals("/api/define")) {

@@ -133,10 +133,43 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
     display: flex;
     flex-direction: column;
     height: 100vh;
-    overflow: hidden;
+    overflow: visible;
+    position: relative;
     z-index: 10;
     flex-shrink: 0;
 }
+.ai-panel-shell {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 100%;
+    height: 100%;
+    background: var(--panel-right-bg);
+    border-left: 1px solid var(--border);
+}
+.col-right.ai-expanded { z-index: 50; }
+.col-right.ai-expanded .ai-panel-shell {
+    width: calc(100vw * 2 / 3);
+    box-shadow: -16px 0 40px rgba(0,0,0,.4);
+}
+.ai-desktop-expand-btn {
+    position: absolute;
+    left: -14px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 26px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(168,85,247,.4);
+    border-radius: 9px;
+    background: var(--panel-right-bg);
+    color: var(--purple-light);
+    cursor: pointer;
+    z-index: 1;
+}
+.ai-desktop-expand-btn:hover { background: #241334; border-color: var(--purple); }
 
 /* ═══════════════════════════════ LEFT PANEL: PLAZA, EPISODES & PLAYER ═══════════════════════════════ */
 .left-top-area {
@@ -682,7 +715,7 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
     flex: 1;
     display: flex;
     flex-direction: column;
-    height: 100vh;
+    height: 100%;
     overflow: hidden;
 }
 .ai-hd {
@@ -705,8 +738,12 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
 }
 .ai-badge {
     font-size: 10px;
+    padding: 2px 7px;
+    border-radius: 99px;
+    background: rgba(168,85,247,0.18);
     color: var(--purple-light);
-    font-weight: 400;
+    border: 1px solid rgba(168,85,247,0.35);
+    font-weight: 600;
 }
 .ai-hd-actions {
     display: flex;
@@ -1047,13 +1084,15 @@ body.android-runtime .android-only{display:inline-flex!important}
     .settings-footer{padding:6px}
     .settings-footer button{font-size:11px;padding:8px}
 }
-.phone-toolbar,.phone-scrim,.ai-expand-btn{display:none}
+.phone-toolbar,.phone-scrim{display:none}
 @media(max-width:600px){
     body{display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:44px minmax(0,1.4fr) minmax(0,1fr);height:100dvh}
     .phone-toolbar{display:flex;grid-row:1;align-items:center;justify-content:space-between;padding:0 14px;border-bottom:1px solid var(--border);background:var(--panel-left-bg);font-size:14px;font-weight:600}
     .phone-toolbar button{height:40px;min-width:44px;border:0;background:transparent;color:var(--purple-light);font-size:14px}
     .col-mid{grid-row:2;width:100%;height:100%;border-right:0;min-height:0}
     .col-right{grid-row:3;width:100%;height:100%;min-height:0;border-top:1px solid var(--border)}
+    .col-right.ai-expanded .ai-panel-shell{width:100%;box-shadow:none}
+    .ai-desktop-expand-btn{display:none}
     .col-left{position:fixed;top:44px;bottom:0;left:0;width:min(340px,88vw);height:calc(100dvh - 44px);z-index:92;box-shadow:12px 0 40px rgba(0,0,0,.5)}
     .col-left.collapsed{display:none!important}
     .col-left:not(.collapsed) ~ .phone-scrim{display:block;position:fixed;inset:44px 0 0;z-index:91;border:0;background:rgba(0,0,0,.6)}
@@ -1080,9 +1119,6 @@ body.android-runtime .android-only{display:inline-flex!important}
     body.android-runtime .mp-right .lb{width:100%}
     .lb{min-height:30px;min-width:30px;padding:4px 7px}
     .ai-hd{height:38px;padding:0 14px}
-    .ai-expand-btn{display:flex;width:64px;height:28px;margin:0 auto;flex-shrink:0;border-top:0;border-radius:0 0 8px 8px;color:var(--purple-light)}
-    .ai-expand-btn svg{width:18px;height:18px;transition:transform .2s}
-    .ai-expand-btn[aria-expanded="true"] svg{transform:rotate(180deg)}
     .ai-hd-title{font-size:13px;flex-wrap:nowrap}
     .ai-input-panel{padding:8px 14px max(24px,env(safe-area-inset-bottom));gap:6px}
     .ai-quick-tags{flex-wrap:nowrap;overflow-x:auto}
@@ -1098,7 +1134,18 @@ body.android-runtime .android-only{display:inline-flex!important}
     .mid-player-console .lp-loop-row,body.android-runtime .mid-player-console .lp-loop-row{display:none}
     .ai-input-panel{padding-bottom:12px}
 }
+
+.ai-phone-expand-btn,.ai-badge{display:none}
+/* Device sidebar width does not change the Web column proportions. */
+@media(min-width:601px){
+    body.android-runtime{--tablet-sidebar-width:clamp(220px,26vw,340px)}
+    body.android-runtime .col-left{width:var(--tablet-sidebar-width);min-width:0;max-width:none}
+}
 @media(max-width:600px){
+    .ai-phone-expand-btn{display:flex;width:64px;height:28px;margin:0 auto;flex-shrink:0;border-top:0;border-radius:0 0 8px 8px;color:var(--purple-light)}
+    .ai-phone-expand-btn svg{width:18px;height:18px;transition:transform .2s}
+    .ai-phone-expand-btn[aria-expanded="true"] svg{transform:rotate(180deg)}
+    .ai-badge{display:inline;font-size:10px;color:var(--purple-light);font-weight:400;background:none;border:0;padding:0}
     body.ai-expanded{grid-template-rows:44px minmax(0,1fr)}
     body.ai-expanded .col-mid{display:none}
     body.ai-expanded .col-right{grid-row:2}
@@ -1286,10 +1333,13 @@ body.android-runtime .android-only{display:inline-flex!important}
 
 <!-- ═══════════════════════════════ COLUMN 3: RIGHT (~25vw) AI Q&A COPILOT ═══════════════════════════════ -->
 <section class="col-right" id="colRight" ondblclick="toggleAiOnBlank(event)" onpointerdown="handleAiBlankTap(event)" onpointermove="handleAiBlankTap(event)" onpointerup="handleAiBlankTap(event)" onpointercancel="handleAiBlankTap(event)">
-    <div class="ai-section">
-        <button type="button" class="icon-btn ai-expand-btn" id="aiExpandBtn" onclick="toggleAiExpanded()" aria-label="展开助教对话" title="展开助教对话" aria-expanded="false" aria-controls="aiMessages">
+    <div class="ai-panel-shell" id="aiPanelShell">
+    <button class="ai-desktop-expand-btn" id="aiDesktopExpandBtn" type="button" onclick="toggleAiPanel()" title="向左展开助教" aria-label="向左展开助教" aria-expanded="false" aria-controls="aiPanelShell"><i class="fa-solid fa-chevron-left" id="aiExpandIcon" aria-hidden="true"></i></button>
+    <div class="ai-section" id="aiSection">
+        <button type="button" class="icon-btn ai-phone-expand-btn" id="aiPhoneExpandBtn" onclick="toggleAiExpanded()" aria-label="展开助教对话" title="展开助教对话" aria-expanded="false" aria-controls="aiMessages">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 15 6-6 6 6"/></svg>
         </button>
+
         <div class="ai-hd">
             <div class="ai-hd-title">
                 <i class="fa-solid fa-wand-magic-sparkles" style="color:var(--purple)"></i>
@@ -1332,6 +1382,7 @@ body.android-runtime .android-only{display:inline-flex!important}
                 </button>
             </div>
         </div>
+    </div>
     </div>
 </section>
 
@@ -1406,7 +1457,7 @@ function toggleAiExpanded() {
     const messages = document.getElementById('aiMessages');
     const scrollTop = messages.scrollTop;
     const expanded = document.body.classList.toggle('ai-expanded');
-    const button = document.getElementById('aiExpandBtn');
+    const button = document.getElementById('aiPhoneExpandBtn');
     const label = expanded ? '收起助教对话' : '展开助教对话';
     button.setAttribute('aria-expanded', String(expanded));
     button.setAttribute('aria-label', label);
@@ -1475,6 +1526,7 @@ function restoreAndroidPlaybackState() {
 
 function resumeAndroidPlayback() {
     if (!nowPlaying) { restoreAndroidPlaybackState(); return; }
+    ensureAndroidAudioSource();
     // Re-open SSE from its durable checkpoint after background WebView suspension.
     if (!subtitlesComplete) triggerAiTranscribe(true,true);
     else playWhenReady();
@@ -1503,6 +1555,34 @@ let lastVolume = 1.0;
 //  COLLAPSIBLE SIDEBAR
 // ══════════════════════════════════════════════
 let isSidebarCollapsed = false;
+
+function toggleAiPanel(force) {
+    const panel = document.getElementById('colRight');
+    const expanded = panel.classList.toggle('ai-expanded', typeof force === 'boolean' ? force : !panel.classList.contains('ai-expanded'));
+    const button = document.getElementById('aiDesktopExpandBtn');
+    const label = expanded ? '收回助教' : '向左展开助教';
+    button.setAttribute('aria-expanded', String(expanded));
+    button.setAttribute('aria-label', label);
+    button.title = label;
+    document.getElementById('aiExpandIcon').className = expanded ? 'fa-solid fa-chevron-right' : 'fa-solid fa-chevron-left';
+}
+
+function initAiExpansion() {
+    window.matchMedia('(max-width:600px)').addEventListener('change', event => {
+        if (event.matches) toggleAiPanel(false);
+        else if (document.body.classList.contains('ai-expanded')) toggleAiExpanded();
+    });
+    document.addEventListener('keydown', event => {
+        if (event.key !== 'Escape') return;
+        if (document.getElementById('colRight').classList.contains('ai-expanded')) {
+            toggleAiPanel(false);
+            document.getElementById('aiDesktopExpandBtn').focus();
+        } else if (document.body.classList.contains('ai-expanded')) {
+            toggleAiExpanded();
+            document.getElementById('aiPhoneExpandBtn').focus();
+        }
+    });
+}
 
 function setSidebarCollapsed(collapsed) {
     isSidebarCollapsed = !!collapsed;
@@ -1786,7 +1866,7 @@ function startPlay(url, title, author, cover, transcriptUrl, description) {
 
     audio.pause();
     audio.preload = 'none';
-    audio.src = (window.androidNativeRuntime || window.PodcastAndroid) ? `/api/audio?url=${enc(url)}` : url;
+    audio.src = isAndroidPlayback() ? androidAudioSource(url) : url;
     audio.playbackRate = speed;
     audio.volume = lastVolume;
     
@@ -1794,6 +1874,26 @@ function startPlay(url, title, author, cover, transcriptUrl, description) {
     setPlayIcon(false);
 
     loadSubtitles();
+}
+
+function isAndroidPlayback() {
+    return Boolean(window.androidNativeRuntime || window.PodcastAndroid);
+}
+
+function androidAudioSource(url) {
+    return '/api/audio?url=' + encodeURIComponent(url);
+}
+
+function ensureAndroidAudioSource() {
+    if (!isAndroidPlayback() || !nowPlaying) return;
+    const source = androidAudioSource(nowPlaying.url);
+    if ((audio.getAttribute ? audio.getAttribute('src') : audio.src) === source) return;
+    const position = androidRestorePosition ?? audio.currentTime;
+    audio.pause();
+    audio.src = source;
+    androidRestorePosition = position;
+    audio.currentTime = position;
+    audio.playbackRate = speed;
 }
 
 function canPlayWithSubtitles() {
@@ -2092,16 +2192,17 @@ function triggerAiTranscribe(auto = false, resume = false) {
                 if (!cues.length) { fail('字幕缓存为空，请点击刷新。'); return; }
                 subtitlesComplete = true;
                 coveredUntil = Infinity;
-                if (data.local_audio && audio.currentTime === 0) audio.src = data.local_audio;
+                if (!isAndroidPlayback() && data.local_audio && audio.currentTime === 0) audio.src = data.local_audio;
                 renderSubs();
                 setBadge(data.status === 'official' ? '✅ 官方字幕' : '✅ 字幕就绪', 'rgba(168,85,247,.15)', '#c084fc', 'rgba(168,85,247,.3)');
                 finish();
                 playWhenReady();
             } else if (data.status === 'audio_source') {
-                if (data.audio_url && audio.currentTime === 0 && audio.paused
-                    && audio.getAttribute?.('src') !== data.audio_url) audio.src = data.audio_url;
+                if (isAndroidPlayback()) ensureAndroidAudioSource();
+                else if (data.audio_url && audio.currentTime === 0 && audio.paused
+                    && (audio.getAttribute ? audio.getAttribute('src') : audio.src) !== data.audio_url) audio.src = data.audio_url;
             } else if (data.status === 'audio_ready') {
-                if (data.local_audio && audio.currentTime === 0 && audio.paused) audio.src = data.local_audio;
+                if (!isAndroidPlayback() && data.local_audio && audio.currentTime === 0 && audio.paused) audio.src = data.local_audio;
                 audio.playbackRate = speed;
             } else if (data.status === 'progress') {
                 setBadge(data.detail, 'rgba(168,85,247,.15)', '#c084fc', 'rgba(168,85,247,.3)');
@@ -2292,7 +2393,7 @@ function updateCueSelectionUI() {
 
 function quickAsk(type) {
     if (aiSending) return;
-    if (!nowPlaying || !cues.length) { toast('请等待首条字幕加载后提问', 'info'); return; }
+    if (!nowPlaying || !cues.length) { toast('请等待首条字幕就绪后提问', 'info'); return; }
     const aiInput = document.getElementById('aiInput');
     if (!aiInput) return;
     const quotes = getSelectedQuotesText();
@@ -2304,7 +2405,7 @@ function quickAsk(type) {
     } else if (type === '逐词翻译') {
         prompt = quotes ? '请将上述选定字幕逐句给出精准、自然的中文对照翻译。' : '请总结当前听到段落的中文大意。';
     } else if (type === '全文要点') {
-        prompt = '结合这期播客的转写内容，用中文清晰梳理出本期节目的核心主旨与要点。';
+        prompt = '结合当前已获得的全部字幕，用中文梳理节目目前的核心主旨与要点。';
     }
     aiInput.value = prompt;
     sendAiQuestion();
@@ -2328,7 +2429,7 @@ function updateAiAvailability() {
     const btn = document.getElementById('aiSendBtn');
     if (btn) {
         btn.disabled = !ready || aiSending;
-        btn.title = ready ? '结合当前已获得的全部字幕提问' : '请等待首条字幕加载';
+        btn.title = ready ? '结合当前已获得的全部字幕提问' : '请等待首条字幕就绪';
     }
     document.querySelectorAll('.qtag').forEach(button => { button.disabled = !ready || aiSending; });
 }
@@ -2336,7 +2437,7 @@ function updateAiAvailability() {
 async function sendAiQuestion() {
     if (aiSending) return;
     if (!nowPlaying || !cues.length) {
-        toast('请等待首条字幕加载后再发送', 'info');
+        toast('请等待首条字幕就绪后再发送', 'info');
         return;
     }
     const input = document.getElementById('aiInput');
@@ -2829,6 +2930,8 @@ function alignBottomPanels() {
             document.documentElement.style.removeProperty('--footer-height');
             return;
         }
+        // Keep the subtitle/player layout stable while the tutor overlays it.
+        if (document.getElementById('colRight').classList.contains('ai-expanded')) return;
         document.documentElement.style.setProperty('--footer-height',Math.ceil(Math.max(...panels.map(naturalHeight))) + 'px');
     };
     update();
@@ -2917,6 +3020,7 @@ try {
 } catch (_) {}
 
 window.onload = () => {
+    initAiExpansion();
     alignBottomPanels();
     loadNotebook();
     updateAiAvailability();

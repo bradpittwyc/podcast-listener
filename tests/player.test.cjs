@@ -409,3 +409,55 @@ test('catalog failures show the server error instead of treating it as podcast d
     await p.run("loadPodcast('1200361736')");
     assert.match(p.elements.get('plazaContent').innerHTML,/Secure connection failed/);
 });
+
+test('Android starts with the native proxy before subtitle events, including official subtitles', () => {
+    const p = player();
+    // The bridge exists before MainActivity sets androidNativeRuntime.
+    p.run('window.PodcastAndroid = {}');
+    const url = 'https://example.com/episode.mp3?token=a&part=2';
+    p.start(url);
+    assert.equal(p.audio.src, '/api/audio?url=' + encodeURIComponent(url));
+    assert.equal(p.audio.playCount, 0);
+    p.streams[0].emit({status:'official',vtt:'WEBVTT\n\n00:00:00.000 --> 00:00:20.000\nHello world\n',local_audio:'/cache/audio.mp3'});
+    assert.equal(p.audio.src, '/api/audio?url=' + encodeURIComponent(url));
+    assert.equal(p.audio.paused, false);
+});
+
+
+test('Android restored playback keeps its proxy and position when resumed arrives before audio_source', () => {
+    const storage = new Map([['android_playback_state', JSON.stringify({
+        episode:{url:'https://example.com/one.mp3'},position:17,playing:true,speed:.75,volume:.6
+    })]]);
+    const p = player(storage);
+    let source, assignments = 0;
+    // Browser media resets when its source is assigned, even if it is the same URL.
+    Object.defineProperty(p.audio, 'src', {get(){return source;},set(value){source=value;assignments++;this.currentTime=0;this.paused=true;}});
+    p.run('window.androidNativeRuntime=true;restoreAndroidPlaybackState()');
+    assert.equal(source, '/api/audio?url=https%3A%2F%2Fexample.com%2Fone.mp3');
+    const stream = p.streams[0];
+    stream.emit({status:'resumed',until:30,cues:[{start:0,end:20,text:'Hello world'}]});
+    assert.equal(p.audio.currentTime,17);
+    assert.equal(p.audio.paused,false);
+    stream.emit({status:'audio_source',audio_url:source});
+    stream.emit({status:'audio_ready',local_audio:'/cache/audio.mp3'});
+    assert.equal(assignments,1);
+    assert.equal(p.audio.currentTime,17);
+    assert.equal(p.audio.paused,false);
+    assert.equal(p.audio.playbackRate,.75);
+});
+
+
+test('Android foreground recovery replaces a legacy direct URL at a nonzero position and preserves manual pause', () => {
+    const p = player();
+    p.run('window.androidNativeRuntime=true');p.start();
+    p.streams[0].emit(cue(0,20));p.streams[0].emit({status:'chunk_ready',until:30});
+    p.run('togglePlay()');
+    p.audio.src='https://example.com/one.mp3';p.audio.currentTime=12;
+    p.run('resumeAndroidPlayback()');
+    assert.equal(p.audio.src,'/api/audio?url=https%3A%2F%2Fexample.com%2Fone.mp3');
+    assert.equal(p.audio.currentTime,12);
+    assert.equal(p.run('wantsPlayback'),false);
+    p.streams[1].emit({status:'resumed',until:30,cues:[{start:0,end:20,text:'Hello world'}]});
+    assert.equal(p.audio.paused,true);
+    assert.equal(p.audio.currentTime,12);
+});

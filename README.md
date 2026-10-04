@@ -16,6 +16,8 @@ Python FastAPI + HTML/JavaScript 的播客学习工具，支持 Apple Podcasts �
 - AI 助教在首条字幕到达后即可提问，发送时携带当前已获得的全部字幕（含单句修正）、提示词、用户问题和勾选例句，不等待整集转写完成。助教和查词仍使用 Gemini。
 - 阿里云字幕与旧 Groq 缓存分开。整集刷新清除当前断点和单句修正；音频和完整字幕采用原子缓存。
 
+Web 和平板的助教区可向左展开至屏幕的三分之二，覆盖字幕但不挤压原布局，可按 Esc 收起。手机可通过箭头或双击助教空白区域上下展开阅读；长回答可滚动。分享字幕仍需等整集完成。
+
 ## 本地启动
 
 需要 Python 3.10+ 和加入 PATH 的 FFmpeg。
@@ -57,4 +59,5 @@ node --test tests/player.test.cjs
 ```powershell
 python -m pip install playwright
 python tests/browser_smoke.py
+python tests/layout_smoke.py
 ```

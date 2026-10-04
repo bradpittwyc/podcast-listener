@@ -1,0 +1,81 @@
+"""Browser checks for the integrated desktop, tablet and phone tutor layouts."""
+
+from pathlib import Path
+
+from playwright.sync_api import sync_playwright
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def main():
+    html = (ROOT / "static/index.html").read_text(encoding="utf-8")
+    errors = []
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel="msedge", headless=True)
+        try:
+            for width, native in [(1440, False), (1024, False), (1280, True), (800, True), (390, True), (360, True)]:
+                context = browser.new_context(viewport={"width": width, "height": 900}, has_touch=width <= 600)
+                if native:
+                    context.add_init_script("window.androidNativeRuntime = true")
+                page = context.new_page()
+                page.on("pageerror", lambda error: errors.append(str(error)))
+                page.route("**/*", lambda route: route.fulfill(
+                    body=html if route.request.url == "http://layout.test/" else "{}",
+                    content_type="text/html" if route.request.url == "http://layout.test/" else "application/json"))
+                page.goto("http://layout.test/")
+                page.evaluate("collapseSidebar(); appendChatMessage('ai', 'A long answer. '.repeat(2000))")
+                assert page.evaluate("new Set([...document.querySelectorAll('[id]')].map(e => e.id)).size === document.querySelectorAll('[id]').length")
+                assert page.evaluate("document.getElementById('aiMessages').scrollHeight > document.getElementById('aiMessages').clientHeight")
+                if width > 600:
+                    page.wait_for_function("document.getElementById('colLeft').getBoundingClientRect().width === 0")
+                    assert not page.locator("#aiPhoneExpandBtn").is_visible()
+                    assert not page.locator(".ai-badge").is_visible()
+                    bounds = "() => ['colLeft','colMid','colRight'].map(id => {let r=document.getElementById(id).getBoundingClientRect();return [r.x,r.y,r.width,r.height]})"
+                    before = page.evaluate(bounds)
+                    page.locator("#aiDesktopExpandBtn").click()
+                    assert page.locator("#aiDesktopExpandBtn").get_attribute("aria-expanded") == "true"
+                    assert page.evaluate(bounds) == before
+                    assert abs(page.locator("#aiPanelShell").bounding_box()["width"] - width * 2 / 3) < 1
+                    page.locator("#aiDesktopExpandBtn").click()
+                    assert page.evaluate(bounds) == before
+                    page.locator("#aiDesktopExpandBtn").click()
+                    page.keyboard.press("Escape")
+                    assert page.locator("#aiDesktopExpandBtn").get_attribute("aria-expanded") == "false"
+                else:
+                    assert not page.locator("#aiDesktopExpandBtn").is_visible()
+                    assert page.locator(".ai-badge").is_visible()
+                    page.locator("#aiPhoneExpandBtn").click()
+                    assert not page.locator("#colMid").is_visible()
+                    assert page.locator("#aiPhoneExpandBtn").get_attribute("aria-expanded") == "true"
+                    page.keyboard.press("Escape")
+                    assert page.locator("#colMid").is_visible()
+                    # Use real touch events on the message list's blank padding.
+                    box = page.locator("#aiMessages").bounding_box()
+                    x, y = box["x"] + 2, box["y"] + box["height"] / 2
+                    assert page.evaluate("([x,y]) => document.elementFromPoint(x,y).id", [x, y]) == "aiMessages"
+                    page.touchscreen.tap(x, y)
+                    page.touchscreen.tap(x, y)
+                    assert page.locator("#aiPhoneExpandBtn").get_attribute("aria-expanded") == "true"
+                    page.locator("#aiPhoneExpandBtn").click()
+                    # A drag must not count as a tap in the double-tap gesture.
+                    page.evaluate("""() => {
+                        let target=document.getElementById('aiMessages');
+                        for (let [type,y] of [['pointerdown',100],['pointermove',150],['pointerup',150]])
+                            target.dispatchEvent(new PointerEvent(type,{bubbles:true,pointerType:'touch',pointerId:1,clientX:5,clientY:y}));
+                    }""")
+                    assert page.locator("#aiPhoneExpandBtn").get_attribute("aria-expanded") == "false"
+                    page.locator("#aiPhoneExpandBtn").click()
+                    page.set_viewport_size({"width": 800, "height": 900})
+                    page.wait_for_function("!document.body.classList.contains('ai-expanded')")
+                    page.locator("#aiDesktopExpandBtn").click()
+                    page.set_viewport_size({"width": width, "height": 900})
+                    page.wait_for_function("!document.getElementById('colRight').classList.contains('ai-expanded')")
+                print(f"Layout passed: width={width}, native={native}")
+                context.close()
+            assert not errors, errors
+        finally:
+            browser.close()
+
+
+if __name__ == "__main__":
+    main()
