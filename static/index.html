@@ -751,7 +751,7 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
 }
 .splash-app-name {
     font-family: "Microsoft YaHei", "微软雅黑", -apple-system, BlinkMacSystemFont, sans-serif;
-    font-size: 34px;
+    font-size: 38px;
     font-weight: 700;
     letter-spacing: 1.5px;
     margin: 0 0 12px 0;
@@ -769,13 +769,17 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
 }
 .splash-slogan {
     font-family: "Microsoft YaHei", "微软雅黑", -apple-system, BlinkMacSystemFont, sans-serif;
-    font-size: 16px;
-    font-weight: 500;
+    font-size: 24px;
+    font-weight: 700;
     color: var(--purple-light, #c084fc);
-    letter-spacing: 0.5px;
+    letter-spacing: 0.8px;
     white-space: pre;
     display: inline-block;
     animation: revealFromLeft 1.8s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+}
+@media(max-width: 600px) {
+    .splash-app-name { font-size: 28px; }
+    .splash-slogan { font-size: 18px; }
 }
 @keyframes revealFromLeft {
     0% {

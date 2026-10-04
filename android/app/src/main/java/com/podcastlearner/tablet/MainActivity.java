@@ -60,14 +60,16 @@ public class MainActivity extends Activity {
                 getPaint().setShader(new LinearGradient(0,0,w,h,new int[]{0xffffffff,0xffe9d5ff,0xffc084fc},null,Shader.TileMode.CLAMP));
             }
         };
-        appName.setText("播客学伴");appName.setTextColor(0xffffffff);appName.setTextSize(30);
+        appName.setText("播客学伴");appName.setTextColor(0xffffffff);
+        appName.setTextSize(getResources().getConfiguration().smallestScreenWidthDp>=600?36:28);
         appName.setTypeface(Typeface.create("Microsoft YaHei",Typeface.BOLD));appName.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams appNameParams=new LinearLayout.LayoutParams(-2,-2);appNameParams.topMargin=dp(18);
         brand.addView(appName,appNameParams);
         TextView slogan=new TextView(this);
-        slogan.setText("Live   in the Language");slogan.setTextColor(0xffc084fc);slogan.setTextSize(15);
-        slogan.setTypeface(Typeface.create("Microsoft YaHei",Typeface.NORMAL));slogan.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams sloganParams=new LinearLayout.LayoutParams(-2,-2);sloganParams.topMargin=dp(10);
+        slogan.setText("Live   in the Language");slogan.setTextColor(0xffc084fc);
+        slogan.setTextSize(getResources().getConfiguration().smallestScreenWidthDp>=600?24:19);
+        slogan.setTypeface(Typeface.create("Microsoft YaHei",Typeface.BOLD));slogan.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams sloganParams=new LinearLayout.LayoutParams(-2,-2);sloganParams.topMargin=dp(12);
         brand.addView(slogan,sloganParams);
         slogan.post(()->{
             int w=slogan.getWidth(), h=slogan.getHeight();
