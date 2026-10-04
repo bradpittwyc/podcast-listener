@@ -10,6 +10,19 @@ from aliyun import api_keys
 
 
 class SettingsTests(unittest.TestCase):
+    def test_translation_provider_persists_and_rejects_unknown_models(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / '.env'
+            path.write_text('DASHSCOPE_API_KEY_1=old-key\n', encoding='utf-8')
+            with patch.object(app, 'BASE_DIR', directory), patch.object(app, 'SETTINGS_PATH', str(path)), patch.dict(os.environ, {}):
+                client = TestClient(app.app)
+                for provider in ('qwen', 'gemini'):
+                    self.assertEqual(client.post('/api/settings', json={'translation_provider': provider}).status_code, 200)
+                    self.assertEqual(client.get('/api/settings').json()['options']['translation_provider'], provider)
+                    self.assertIn('TRANSLATION_PROVIDER', path.read_text())
+                    self.assertIn('old-key', path.read_text())
+                self.assertEqual(client.post('/api/settings', json={'translation_provider': 'invalid'}).status_code, 400)
+
     def test_save_keeps_other_settings_and_does_not_return_secrets(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / '.env'

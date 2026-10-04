@@ -1,4 +1,5 @@
 import os
+import asyncio
 import re
 import json
 import tempfile
@@ -7,6 +8,7 @@ import math
 import shutil
 import aliyun
 import corrections
+import subtitle_translation
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -53,6 +55,7 @@ corrections_lock = threading.Lock()
 KEY_FIELDS = {"gemini_key": "GEMINI_API_KEY",
               "aliyun_key_1": "DASHSCOPE_API_KEY_1", "aliyun_key_2": "DASHSCOPE_API_KEY_2"}
 OPTION_FIELDS = {"subtitle_provider": ("AI_PROVIDER", ("aliyun",)),
+                 "translation_provider": ("TRANSLATION_PROVIDER", ("gemini", "qwen")),
                  "dictionary_provider": ("DICTIONARY_PROVIDER", ("auto", "qwen", "gemini")),
                  "aliyun_region": ("ALIYUN_REGION", ("beijing", "singapore"))}
 
@@ -496,6 +499,47 @@ async def ask_podcast_ai(request: Request):
     except Exception as e:
         print("Gemini Q&A error:", str(e))
         return {"status": "error", "message": str(e)}
+
+@app.post("/api/translate_subtitles")
+async def translate_subtitles(request: Request):
+    try:
+        sentences = subtitle_translation.sentences_from(await request.json())
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="字幕请求无效，请分批提交非空字幕。")
+    provider = provider_settings()["translation_provider"]
+    if provider == "gemini" and not gemini_client:
+        return {"status": "error", "message": "翻译服务未配置，请检查设置。"}
+    if provider == "qwen" and not aliyun.api_keys():
+        return {"status": "error", "message": "翻译服务未配置，请检查设置。"}
+    try:
+        prompt = subtitle_translation.prompt_for(sentences)
+        if provider == "qwen":
+            text = await asyncio.to_thread(qwen_subtitle_translation, prompt)
+        else:
+            response = await asyncio.wait_for(gemini_client.aio.models.generate_content(
+                model=os.environ.get("GEMINI_MODEL", "gemini-3.5-flash"),
+                contents=prompt, config={"response_mime_type": "application/json"},
+            ), timeout=150)
+            text = response.text or ""
+        translated = subtitle_translation.translations_from(text, sentences)
+        return {"status": "success", "provider": provider, "translations": translated}
+    except ValueError as error:
+        return {"status": "error", "message": str(error)}
+    except Exception:
+        return {"status": "error", "message": "字幕翻译失败，请检查网络和翻译模型设置后点击双语字幕重试。"}
+
+
+def qwen_subtitle_translation(prompt):
+    with requests.Session() as session:
+        session.trust_env = False
+        response = session.post(aliyun.root() + "/compatible-mode/v1/chat/completions",
+            headers={"Authorization": "Bearer " + aliyun.api_keys()[0]},
+            json={"model": "qwen-flash", "enable_thinking": False,
+                  "response_format": {"type": "json_object"},
+                  "messages": [{"role": "user", "content": prompt}]}, timeout=(15, 120))
+        response.raise_for_status()
+        return response.json()["choices"][0]["message"]["content"]
+
 
 @app.get("/api/top-charts")
 def get_top_charts(country: str = "us", limit: int = 30):

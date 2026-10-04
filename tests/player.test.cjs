@@ -22,7 +22,7 @@ function player(storage = new Map()) {
     const timers = [], intervals = [], fetchCalls = [];
     let clock = 0;
     class TestDate extends Date { static now() { return clock; } }
-    const context = vm.createContext({document, window: {}, EventSource, console, Date: TestDate,
+    const context = vm.createContext({document, window: {}, EventSource, console, Date: TestDate, AbortController,
         setTimeout(fn, ms) { timers.push({fn, ms}); return timers.length; },
         clearTimeout(id) { if (timers[id - 1]) timers[id - 1].cleared = true; },
         setInterval(fn, ms) { intervals.push({fn, ms}); return intervals.length; },
@@ -460,4 +460,89 @@ test('Android foreground recovery replaces a legacy direct URL at a nonzero posi
     p.streams[1].emit({status:'resumed',until:30,cues:[{start:0,end:20,text:'Hello world'}]});
     assert.equal(p.audio.paused,true);
     assert.equal(p.audio.currentTime,12);
+});
+
+const settleTranslation = async () => { for (let i=0;i<8;i++) await new Promise(resolve=>setImmediate(resolve)); };
+function translationPlayer() {
+    const p=player();p.start();
+    p.run("fetch=async(url,options)=>{globalThis.translationRequests??=[];translationRequests.push(JSON.parse(options.body));return {json:async()=>({status:'success',translations:JSON.parse(options.body).sentences.map(s=>({id:s.id,translation:'中文 '+s.text}))})}}");
+    return p;
+}
+
+test('subtitle translation is opt-in and keeps all English subtitles and playback state', async () => {
+    const p=translationPlayer();p.streams[0].emit(cue(0,20));p.streams[0].emit({status:'chunk_ready',until:30});
+    assert.equal(p.run('globalThis.translationRequests'),undefined);
+    p.audio.currentTime=8;p.run('togglePlay();toggleSubtitleTranslation()');await settleTranslation();
+    assert.match(p.elements.get('subScroll').innerHTML,/Hello/);
+    assert.match(p.elements.get('subScroll').innerHTML,/中文 Hello world/);
+    assert.equal(p.audio.currentTime,8);assert.equal(p.audio.paused,true);
+    assert.equal(p.run('translationRequests.length'),1);
+    p.run('toggleSubtitleTranslation()');assert.doesNotMatch(p.elements.get('subScroll').innerHTML,/sub-translation/);
+    p.run('toggleSubtitleTranslation()');await settleTranslation();assert.equal(p.run('translationRequests.length'),1);
+});
+
+test('streaming sentences and corrected text get translations without resending unchanged sentences', async () => {
+    const p=translationPlayer();p.streams[0].emit(cue(0,20));p.streams[0].emit({status:'chunk_ready',until:30});
+    p.run('toggleSubtitleTranslation()');await settleTranslation();
+    p.streams[0].emit({status:'cue',cue:{start:20,end:40,text:'New sentence.'}});p.streams[0].emit({status:'chunk_ready',until:40});
+    await settleTranslation();assert.equal(p.run('translationRequests[1].sentences.length'),1);
+    assert.equal(p.run('translationRequests[1].sentences[0].text'),'New sentence.');
+    p.run("cues[0].text='Corrected sentence.';renderSubs()");await settleTranslation();
+    assert.equal(p.run('translationRequests[2].sentences[0].text'),'Corrected sentence.');
+    assert.match(p.elements.get('subScroll').innerHTML,/中文 Corrected sentence/);
+    assert.doesNotMatch(p.elements.get('subScroll').innerHTML,/中文 Hello world/);
+});
+
+test('translations are batched and HTML in translated text is escaped', async () => {
+    const p=translationPlayer();
+    p.run("cues=Array.from({length:45},(_,i)=>({start:i,end:i+1,text:'Sentence '+i}));renderSubs();fetch=async(url,options)=>{globalThis.translationRequests??=[];translationRequests.push(JSON.parse(options.body));return {json:async()=>({status:'success',translations:JSON.parse(options.body).sentences.map(s=>({id:s.id,translation:'<img onerror=bad>'}))})}};toggleSubtitleTranslation()");
+    await settleTranslation();assert.equal(p.run('translationRequests.length'),3);
+    assert.equal(p.run('translationRequests[0].sentences.length'),20);
+    assert.equal(p.run('translationRequests[2].sentences.length'),5);
+    assert.match(p.elements.get('subScroll').innerHTML,/&lt;img onerror=bad&gt;/);
+    assert.doesNotMatch(p.elements.get('subScroll').innerHTML,/<img onerror=bad>/);
+});
+
+test('late translation responses are cancelled and cannot affect a different episode', async () => {
+    const p=translationPlayer();p.streams[0].emit(cue(0,20));
+    p.run("fetch=(url,options)=>{if(url!=='/api/translate_subtitles')return Promise.resolve({json:async()=>({})});globalThis.translationSignal=options.signal;return new Promise(resolve=>globalThis.finishTranslation=resolve)};toggleSubtitleTranslation()");
+    p.start('https://example.com/next.mp3');assert.equal(p.run('translationSignal.aborted'),true);
+    p.run("finishTranslation({json:async()=>({status:'success',translations:[{id:0,translation:'OLD'}]})})");
+    await settleTranslation();assert.equal(p.run('subtitleTranslations.size'),0);
+    assert.equal(p.run('subtitleTranslationEnabled'),false);
+});
+
+test('translation failure preserves English and retries only after the button is clicked', async () => {
+    const p=translationPlayer();p.streams[0].emit(cue(0,20));
+    p.run("fetch=async()=>({json:async()=>({status:'success',translations:[]})});toggleSubtitleTranslation()");
+    await settleTranslation();assert.equal(p.run('subtitleTranslationFailed'),true);
+    assert.equal(p.run('cues[0].text'),'Hello world');
+    p.run("fetch=async(url,options)=>({json:async()=>({status:'success',translations:[{id:0,translation:'你好'}]})});toggleSubtitleTranslation()");
+    await settleTranslation();assert.equal(p.run('subtitleTranslationFailed'),false);
+    assert.match(p.elements.get('subScroll').innerHTML,/你好/);
+});
+
+test('refresh discards old translations and retains translation preference', async () => {
+    const p=translationPlayer();p.streams[0].emit(cue(0,20));p.run('toggleSubtitleTranslation()');await settleTranslation();
+    p.run('triggerAiTranscribe()');assert.equal(p.run('subtitleTranslations.size'),0);
+    assert.equal(p.run('subtitleTranslationEnabled'),true);
+    p.streams[1].emit({status:'cue',cue:{start:0,end:20,text:'New recognition.'}});p.streams[1].emit({status:'chunk_ready',until:30});
+    await settleTranslation();assert.match(p.elements.get('subScroll').innerHTML,/中文 New recognition/);
+});
+
+
+test('translation model is loaded and saved independently of dictionary settings', async () => {
+    const p=player();p.run("applyProviderSettings({translation_provider:'qwen',dictionary_provider:'gemini'})");
+    assert.equal(p.elements.get('translationProvider').value,'qwen');
+    p.elements.get('translationProvider').value='gemini';
+    await p.run('saveApiSettings({preventDefault(){}})');
+    const body=JSON.parse(p.fetchCalls[0][1].body);
+    assert.equal(body.translation_provider,'gemini');assert.equal(body.dictionary_provider,'gemini');
+});
+
+test('changing the translation model invalidates existing translations', async () => {
+    const p=translationPlayer();p.streams[0].emit(cue(0,20));p.run('toggleSubtitleTranslation()');await settleTranslation();
+    const epoch=p.run('subtitleTranslationEpoch');p.run("applyProviderSettings({translation_provider:'qwen'})");
+    await settleTranslation();assert.ok(p.run('subtitleTranslationEpoch')>epoch);
+    assert.equal(p.run('subtitleTranslationProvider'),'qwen');assert.equal(p.run('translationRequests.length'),2);
 });

@@ -1,6 +1,7 @@
 """Browser checks for the integrated desktop, tablet and phone tutor layouts."""
 
 from pathlib import Path
+import json
 
 from playwright.sync_api import sync_playwright
 
@@ -19,11 +20,27 @@ def main():
                     context.add_init_script("window.androidNativeRuntime = true")
                 page = context.new_page()
                 page.on("pageerror", lambda error: errors.append(str(error)))
-                page.route("**/*", lambda route: route.fulfill(
-                    body=html if route.request.url == "http://layout.test/" else "{}",
-                    content_type="text/html" if route.request.url == "http://layout.test/" else "application/json"))
+                def respond(route):
+                    url = route.request.url
+                    if url.endswith('/api/translate_subtitles'):
+                        sentences = route.request.post_data_json['sentences']
+                        body = json.dumps({'status':'success','translations':[{'id':item['id'],'translation':'这是一条准确对应的中文译文。'} for item in sentences]})
+                    elif url.endswith('/api/settings'):
+                        body = json.dumps({'configured':{},'options':{'translation_provider':'qwen'}})
+                    else:
+                        body = html if url == 'http://layout.test/' else '{}'
+                    route.fulfill(body=body,content_type='text/html' if url == 'http://layout.test/' else 'application/json')
+                page.route("**/*", respond)
                 page.goto("http://layout.test/")
                 page.evaluate("collapseSidebar(); appendChatMessage('ai', 'A long answer. '.repeat(2000))")
+                page.evaluate("nowPlaying={url:'https://example.com/audio.mp3'};cues=[{start:0,end:10,text:'This sentence stays in English.'}];renderSubs()")
+                assert page.locator('#subtitleTranslateBtn').is_enabled()
+                page.locator('#subtitleTranslateBtn').click()
+                page.wait_for_function("document.querySelector('.sub-translation') !== null")
+                assert page.locator('.sub-translation').inner_text() == '这是一条准确对应的中文译文。'
+                assert 'This' in page.locator('.sub-txt').inner_text()
+                page.locator('#subtitleTranslateBtn').click()
+                assert page.locator('.sub-translation').count() == 0
                 assert page.evaluate("new Set([...document.querySelectorAll('[id]')].map(e => e.id)).size === document.querySelectorAll('[id]').length")
                 assert page.evaluate("document.getElementById('aiMessages').scrollHeight > document.getElementById('aiMessages').clientHeight")
                 if width > 600:

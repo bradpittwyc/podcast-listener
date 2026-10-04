@@ -39,3 +39,5 @@ python android/install.py 设备序列号
 安装脚本将电脑 `.env` 的两把阿里云 Key、地域和 Gemini Key 注入设备私有目录，不打印密钥。应用导入后用 Android Keystore AES-GCM 加密保存并删除临时明文；设置页也使用加密存储。脚本移除旧 USB 转发。
 
 APK：`android/app/build/outputs/apk/debug/app-debug.apk`。Web 和 Android 使用各自缓存；阿里云缓存与旧 Groq 缓存分开。
+
+点击字幕栏的「双语字幕」按钮可提交当前字幕翻译，中文逐句显示在原文下方；开启后自动翻译后续字幕，再次点击关闭中文显示。设置中的「翻译模型」可选阿里云 Qwen 或 Gemini（默认 Gemini），分别复用已有阿里云和 Gemini 配置。更换模型或刷新字幕后重新翻译，单句修正只重译变化的句子；翻译失败保留原文，点击按钮重试。翻译不改变播放位置和暂停状态。

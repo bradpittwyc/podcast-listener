@@ -149,10 +149,13 @@ public final class NativeBackend implements AutoCloseable {
                     next.put("aliyun_region",region);
                     String dictionary=r.body.optString("dictionary_provider",next.optString("dictionary_provider","auto"));
                     if(!dictionary.equals("auto")&&!dictionary.equals("qwen")&&!dictionary.equals("gemini"))throw new IOException("Invalid dictionary provider");
-                    next.put("dictionary_provider",dictionary);writer.save(next);credentials=next;
+                    next.put("dictionary_provider",dictionary);
+                    String translation=r.body.optString("translation_provider",next.optString("translation_provider","gemini"));
+                    if(!translation.equals("qwen")&&!translation.equals("gemini"))throw new IOException("Invalid translation provider");
+                    next.put("translation_provider",translation);writer.save(next);credentials=next;
                 }
             }
-            json(output,object("configured",object("aliyun_key_1",!credentials.optString("aliyun_key_1").isEmpty(),"aliyun_key_2",!credentials.optString("aliyun_key_2").isEmpty(),"gemini_key",!credentials.optString("gemini_key").isEmpty()),"options",object("subtitle_provider","aliyun","aliyun_region",credentials.optString("aliyun_region","beijing"),"dictionary_provider",credentials.optString("dictionary_provider","auto")),"dictionary_route",dictionaryProvider())); return;
+            json(output,object("configured",object("aliyun_key_1",!credentials.optString("aliyun_key_1").isEmpty(),"aliyun_key_2",!credentials.optString("aliyun_key_2").isEmpty(),"gemini_key",!credentials.optString("gemini_key").isEmpty()),"options",object("subtitle_provider","aliyun","aliyun_region",credentials.optString("aliyun_region","beijing"),"dictionary_provider",credentials.optString("dictionary_provider","auto"),"translation_provider",credentials.optString("translation_provider","gemini")),"dictionary_route",dictionaryProvider())); return;
         }
         String country=r.q("country").isEmpty()?"us":r.q("country");
         if(r.path.equals("/api/top-charts")) {
@@ -180,6 +183,18 @@ public final class NativeBackend implements AutoCloseable {
             try { prompt=TutorPrompt.build(r.body); }
             catch(IllegalArgumentException e) { response(output,400,"application/json",bytes(object("detail",e.getMessage()).toString()));return; }
             json(output,object("status","success","answer",gemini(prompt,false)));return;
+        }
+        if(r.path.equals("/api/translate_subtitles") && r.method.equals("POST")) {
+            JSONArray sentences;
+            try {sentences=SubtitleTranslation.sentences(r.body);}
+            catch(IllegalArgumentException error) {response(output,400,"application/json",bytes(object("detail",error.getMessage()).toString()));return;}
+            String provider=credentials.optString("translation_provider","gemini");
+            boolean configured=provider.equals("qwen")?(!credentials.optString("aliyun_key_1").trim().isEmpty()||!credentials.optString("aliyun_key_2").trim().isEmpty()):!credentials.optString("gemini_key").trim().isEmpty();
+            if(!configured) {json(output,object("status","error","message","翻译服务未配置，请检查设置。"));return;}
+            try {String prompt=SubtitleTranslation.prompt(sentences);String text=provider.equals("qwen")?qwenJson(prompt,"翻译"):gemini(prompt,true);
+                json(output,object("status","success","provider",provider,"translations",SubtitleTranslation.translations(text,sentences)));}
+            catch(Exception error) {json(output,object("status","error","message",error instanceof IllegalArgumentException?error.getMessage():"字幕翻译失败，请检查网络和翻译模型设置后点击双语字幕重试。"));}
+            return;
         }
         if(r.path.equals("/api/define")) {
             String prompt="Analyze English word '"+r.q("word")+"' in context '"+r.q("context")+"'. Return a JSON object with word, phonetic, pos, definition_en, translation_cn, example, example_cn, context_note. Use Chinese for translations and context_note.";
@@ -389,7 +404,8 @@ public final class NativeBackend implements AutoCloseable {
             }catch(Exception e){control.stop();throw new IOException("Subtitle connection interrupted",e);}
         }
     }
-    private String qwenDictionary(String prompt) throws Exception {
+    private String qwenDictionary(String prompt) throws Exception { return qwenJson(prompt,"查词"); }
+    private String qwenJson(String prompt,String purpose) throws Exception {
         JSONObject config=credentials;
         List<String> keys=new ArrayList<>();
         for(String name:new String[]{"aliyun_key_1","aliyun_key_2"}){String key=config.optString(name).trim();if(!key.isEmpty()&&!keys.contains(key))keys.add(key);}
@@ -404,7 +420,7 @@ public final class NativeBackend implements AutoCloseable {
         try(okhttp3.Response response=aliyunClient(region).newBuilder().readTimeout(60,TimeUnit.SECONDS)
             .callTimeout(75,TimeUnit.SECONDS).build().newCall(request).execute()) {
             if(!response.isSuccessful())throw new CloudError(response.code()){
-                @Override public String getMessage(){return "Qwen 查词返回 HTTP "+status+"，请检查阿里云密钥、权限或额度。";}
+                @Override public String getMessage(){return "Qwen "+purpose+"返回 HTTP "+status+"，请检查阿里云密钥、权限或额度。";}
             };
             JSONObject result=new JSONObject(new String(read(response.body().byteStream(),1024*1024),StandardCharsets.UTF_8));
             return result.getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content");
@@ -489,12 +505,12 @@ public final class NativeBackend implements AutoCloseable {
                 } catch(Exception ignored){}
             }
             List<String> keys=new ArrayList<>();for(String name:new String[]{"aliyun_key_1","aliyun_key_2"}){String key=credentials.optString(name).trim();if(!key.isEmpty()&&!keys.contains(key))keys.add(key);}
-            if(keys.isEmpty()){events.send(object("status","error","detail","请在设置中填写 Alibaba Key","retryable",false));return;}
+            if(keys.isEmpty()){events.send(object("status","error","detail","字幕服务未配置，请检查设置","retryable",false));return;}
             double until=state.optDouble("until",0);int index=state.optInt("next_chunk",0);
             JSONObject fragment=state.optJSONObject("pending_sentence");
             double coverage=fragment==null?until:(cues.length()==0?0:cues.getJSONObject(cues.length()-1).getDouble("end"));
             events.send(object("status","resumed","until",coverage,"cues",cues));
-            events.send(object("status","progress","detail","设备正在流式下载并解码，首段字幕就绪后播放。"));
+            events.send(object("status","progress","detail","设备正在解码，首段字幕就绪后播放"));
             decode(url,until,index,cues,fragment,keys,file,events);
         } catch(Exception error) {
             if(!events.stopped.get())try {Throwable cause=error;while(cause.getCause()!=null)cause=cause.getCause();boolean retryable=cause instanceof AliyunStream.Failure?((AliyunStream.Failure)cause).retryable:(!(cause instanceof CloudError)||((CloudError)cause).status==429||((CloudError)cause).status>=500);
@@ -543,7 +559,6 @@ public final class NativeBackend implements AutoCloseable {
                 while(tasks.size()>=keys.size()){drain(true);if(events.stopped.get()||closed)throw new IOException("Cancelled");}
                 current=new AliyunStream(aliyunClient(region),keys.get(index%keys.size()),region,offset,index,events.control);tasks.add(current);
                 current.windowStart=windowStart;current.windowEnd=windowEnd;
-                events.send(object("status","progress","detail","Alibaba Key "+(index%keys.size()+1)+" streaming task "+(index+1)));
             }
             // Split a PCM frame exactly at the task boundary, including resumed offsets.
             int available=Math.max(2,(int)Math.round((length(offset)-current.duration)*32000));available-=available%2;
@@ -572,13 +587,11 @@ public final class NativeBackend implements AutoCloseable {
         StreamingPipeline pipeline=new StreamingPipeline(resume,firstIndex,cues,fragment,keys,file,events);
         pipeline.windowStart=events.recognitionStart;pipeline.windowEnd=events.recognitionEnd;
         try {
-            events.send(object("status","progress","detail","正在连接音频来源，连接后开始阿里云转写。"));
             if(events.stopped.get()||closed)return;
             extractor.setDataSource("http://127.0.0.1:8557/api/audio?url="+encode(url)+"&request_id="+encode(events.jobId),Collections.singletonMap("User-Agent","PodcastLearner/2.0"));
             MediaFormat format=null;for(int i=0;i<extractor.getTrackCount();i++){MediaFormat candidate=extractor.getTrackFormat(i);if(candidate.getString(MediaFormat.KEY_MIME).startsWith("audio/")){format=candidate;extractor.selectTrack(i);break;}}
             if(format==null)throw new IOException("No supported audio track");
             if(format.containsKey(MediaFormat.KEY_DURATION))endAt=Math.min(endAt,format.getLong(MediaFormat.KEY_DURATION)/1000000.0+.25);
-            events.send(object("status","progress","detail","音频已连接，正在解码并上传阿里云。"));
             codec=MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME));codec.configure(format,null,null,0);codec.start();
             int sourceRate=format.getInteger(MediaFormat.KEY_SAMPLE_RATE),channels=format.getInteger(MediaFormat.KEY_CHANNEL_COUNT),encoding=AudioFormat.ENCODING_PCM_16BIT;
             int targetRate=16000;long sourceFrame=0,nextTargetFrame=0,skip=Math.round(resume*targetRate);
