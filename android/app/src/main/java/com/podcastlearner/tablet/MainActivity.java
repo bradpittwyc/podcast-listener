@@ -50,7 +50,7 @@ public class MainActivity extends Activity {
         splash.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,new int[]{0xff1b102c,0xff0d0d18,0xff09090f}));
         LinearLayout brand=new LinearLayout(this);
         brand.setOrientation(LinearLayout.VERTICAL);brand.setGravity(Gravity.CENTER);
-        ImageView icon=new ImageView(this);icon.setImageResource(R.drawable.ic_podcast);
+        ImageView icon=new ImageView(this);icon.setImageResource(R.drawable.podcast_brand);icon.setScaleType(ImageView.ScaleType.CENTER_CROP);
         GradientDrawable iconShape=new GradientDrawable();iconShape.setColor(0xff15101f);iconShape.setCornerRadius(dp(26));iconShape.setStroke(dp(1),0xff40234f);
         icon.setBackground(iconShape);icon.setClipToOutline(true);icon.setElevation(dp(12));
         brand.addView(icon,new LinearLayout.LayoutParams(dp(96),dp(96)));
