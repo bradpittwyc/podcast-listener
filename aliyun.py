@@ -275,7 +275,7 @@ class StreamTask:
                 raise ASRError('转写已取消。', retryable=False)
             self.ws.send(json.dumps({'header': {'action': 'run-task', 'task_id': self.task_id, 'streaming': 'duplex'},
             'payload': {'task_group': 'audio', 'task': 'asr', 'function': 'recognition',
-                'model': 'qwen-audio-3.0-asr-flash-streaming',
+                'model': 'qwen-audio-3.1-asr-flash-streaming',
                 'parameters': {'format': 'pcm', 'sample_rate': 16000, 'max_sentence_silence': 500, 'multi_threshold_mode_enabled': True, 'heartbeat': True}, 'input': {}}}))
             reply = json.loads(self.ws.recv())
             if reply.get('header', {}).get('event') != 'task-started':

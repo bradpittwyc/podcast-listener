@@ -4,7 +4,7 @@ Python FastAPI + HTML/JavaScript 的播客学习工具，支持 Apple Podcasts �
 
 ## 字幕与播放
 
-优先使用 RSS 官方 WebVTT 或完整缓存。需要生成字幕时，Web 和 Android 均使用阿里云北京地域的 `qwen-audio-3.0-asr-flash-streaming`，已移除 Groq 转写入口。
+优先使用 RSS 官方 WebVTT 或完整缓存。需要生成字幕时，Web 和 Android 均使用阿里云北京地域的 `qwen-audio-3.1-asr-flash-streaming`，已移除 Groq 转写入口。
 
 - 下载的数据持续解码为 16 kHz 单声道 PCM，每约 100 毫秒通过 WebSocket 上传，不等待整集下载。Web 使用 FFmpeg，Android 使用 MediaExtractor / MediaCodec。
 - 前 5 分钟每 30 秒切换任务，5–15 分钟每 120 秒，之后每 300 秒。两把不同 Key 交替，最多两个任务并行，结果按音频顺序提交。相同 Key 合并为一个通道。

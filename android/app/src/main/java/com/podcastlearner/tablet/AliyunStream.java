@@ -19,7 +19,7 @@ final class AliyunStream implements AutoCloseable {
     static final OkHttpClient CLIENT = new OkHttpClient.Builder().proxy(Proxy.NO_PROXY)
         .connectTimeout(20, TimeUnit.SECONDS).readTimeout(0, TimeUnit.SECONDS)
         .pingInterval(15, TimeUnit.SECONDS).build();
-    static final String MODEL = "qwen-audio-3.0-asr-flash-streaming";
+    static final String MODEL = "qwen-audio-3.1-asr-flash-streaming";
     final double offset;
     final int index;
     volatile double duration;
