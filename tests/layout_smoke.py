@@ -32,8 +32,25 @@ def main():
                     route.fulfill(body=body,content_type='text/html' if url == 'http://layout.test/' else 'application/json')
                 page.route("**/*", respond)
                 page.goto("http://layout.test/")
+                page.evaluate("toast('<img onerror=bad>字幕连接失败','info')")
+                notice = page.locator('.toast').last
+                assert notice.bounding_box()['y'] < 100
+                assert notice.evaluate("el => getComputedStyle(el).animationName") == 'none'
+                assert notice.locator('img').count() == 0
+                page.evaluate("document.getElementById('toastWrap').innerHTML=''")
                 page.evaluate("collapseSidebar(); appendChatMessage('ai', 'A long answer. '.repeat(2000))")
-                page.evaluate("nowPlaying={url:'https://example.com/audio.mp3'};cues=[{start:0,end:10,text:'This sentence stays in English.'}];renderSubs()")
+                page.evaluate("nowPlaying={url:'https://example.com/audio.mp3'};cues=[{start:0,end:10,text:'This sentence stays in English.'}];document.getElementById('welcome').style.display='none';document.getElementById('subScroll').style.display='block';renderSubs()")
+                save = page.locator('#sbtn-0')
+                assert save.is_visible() and save.evaluate("el => getComputedStyle(el).opacity") == '1'
+                assert save.bounding_box()['height'] >= 36
+                assert save.inner_text().strip() == '收藏'
+                save.click()
+                assert save.get_attribute('aria-pressed') == 'true'
+                assert save.inner_text().strip() == '已收藏'
+                save.click()
+                assert save.get_attribute('aria-pressed') == 'false'
+                assert save.inner_text().strip() == '收藏'
+                assert page.evaluate("document.getElementById('subScroll').scrollWidth <= document.getElementById('subScroll').clientWidth")
                 assert page.locator('#subtitleTranslateBtn').is_enabled()
                 page.locator('#subtitleTranslateBtn').click()
                 page.wait_for_function("document.querySelector('.sub-translation') !== null")

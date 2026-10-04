@@ -55,6 +55,7 @@ corrections_lock = threading.Lock()
 KEY_FIELDS = {"gemini_key": "GEMINI_API_KEY",
               "aliyun_key_1": "DASHSCOPE_API_KEY_1", "aliyun_key_2": "DASHSCOPE_API_KEY_2"}
 OPTION_FIELDS = {"subtitle_provider": ("AI_PROVIDER", ("aliyun",)),
+                 "tutor_provider": ("TUTOR_PROVIDER", ("qwen", "gemini")),
                  "translation_provider": ("TRANSLATION_PROVIDER", ("gemini", "qwen")),
                  "dictionary_provider": ("DICTIONARY_PROVIDER", ("auto", "qwen", "gemini")),
                  "aliyun_region": ("ALIYUN_REGION", ("beijing", "singapore"))}
@@ -424,11 +425,11 @@ def define_word(word: str = Query(..., min_length=1), context: str = ""):
 @app.post("/api/ask")
 async def ask_podcast_ai(request: Request):
     """
-    Use Gemini AI to answer user questions about the podcast or selected subtitle lines.
-    Automatically retrieves the full transcript from cache or client payload.
+    Use the selected tutor model with the client's current subtitle snapshot.
     """
-    if not gemini_client:
-        return {"status": "error", "message": "GEMINI_API_KEY 环境变量未配置，请在 .env 中设置"}
+    provider = provider_settings()["tutor_provider"]
+    if (provider == "gemini" and not gemini_client) or (provider == "qwen" and not aliyun.api_keys()):
+        return {"status": "error", "message": "助教服务未配置，请检查设置。"}
 
     try:
         body = await request.json()
@@ -489,16 +490,18 @@ async def ask_podcast_ai(request: Request):
 回答使用流畅自然的中文，可适当使用 Markdown 格式（粗体、列表、引用等），便于排版阅读。"""
 
     try:
-        model_name = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
-        response = await gemini_client.aio.models.generate_content(
-            model=model_name,
-            contents=prompt,
-        )
-        answer = (response.text or "").strip()
-        return {"status": "success", "answer": answer}
-    except Exception as e:
-        print("Gemini Q&A error:", str(e))
-        return {"status": "error", "message": str(e)}
+        if provider == "qwen":
+            answer = (await asyncio.to_thread(qwen_completion, prompt, False)).strip()
+        else:
+            response = await asyncio.wait_for(gemini_client.aio.models.generate_content(
+                model=os.environ.get("GEMINI_MODEL", "gemini-3.5-flash"), contents=prompt,
+            ), timeout=150)
+            answer = (response.text or "").strip()
+        if not answer:
+            return {"status": "error", "message": "助教未返回回答，请重试。"}
+        return {"status": "success", "provider": provider, "answer": answer}
+    except Exception:
+        return {"status": "error", "message": "助教请求失败，请检查网络和助教模型设置后重试。"}
 
 @app.post("/api/translate_subtitles")
 async def translate_subtitles(request: Request):
@@ -514,7 +517,7 @@ async def translate_subtitles(request: Request):
     try:
         prompt = subtitle_translation.prompt_for(sentences)
         if provider == "qwen":
-            text = await asyncio.to_thread(qwen_subtitle_translation, prompt)
+            text = await asyncio.to_thread(qwen_completion, prompt, True)
         else:
             response = await asyncio.wait_for(gemini_client.aio.models.generate_content(
                 model=os.environ.get("GEMINI_MODEL", "gemini-3.5-flash"),
@@ -529,14 +532,16 @@ async def translate_subtitles(request: Request):
         return {"status": "error", "message": "字幕翻译失败，请检查网络和翻译模型设置后点击双语字幕重试。"}
 
 
-def qwen_subtitle_translation(prompt):
+def qwen_completion(prompt, json_output=True):
+    payload = {"model": "qwen-flash", "enable_thinking": False,
+               "messages": [{"role": "user", "content": prompt}]}
+    if json_output:
+        payload["response_format"] = {"type": "json_object"}
     with requests.Session() as session:
         session.trust_env = False
         response = session.post(aliyun.root() + "/compatible-mode/v1/chat/completions",
             headers={"Authorization": "Bearer " + aliyun.api_keys()[0]},
-            json={"model": "qwen-flash", "enable_thinking": False,
-                  "response_format": {"type": "json_object"},
-                  "messages": [{"role": "user", "content": prompt}]}, timeout=(15, 120))
+            json=payload, timeout=(15, 120))
         response.raise_for_status()
         return response.json()["choices"][0]["message"]["content"]
 

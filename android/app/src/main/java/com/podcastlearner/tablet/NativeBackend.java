@@ -152,10 +152,13 @@ public final class NativeBackend implements AutoCloseable {
                     next.put("dictionary_provider",dictionary);
                     String translation=r.body.optString("translation_provider",next.optString("translation_provider","gemini"));
                     if(!translation.equals("qwen")&&!translation.equals("gemini"))throw new IOException("Invalid translation provider");
-                    next.put("translation_provider",translation);writer.save(next);credentials=next;
+                    next.put("translation_provider",translation);
+                    String tutor=r.body.optString("tutor_provider",next.optString("tutor_provider","qwen"));
+                    if(!tutor.equals("qwen")&&!tutor.equals("gemini"))throw new IOException("Invalid tutor provider");
+                    next.put("tutor_provider",tutor);writer.save(next);credentials=next;
                 }
             }
-            json(output,object("configured",object("aliyun_key_1",!credentials.optString("aliyun_key_1").isEmpty(),"aliyun_key_2",!credentials.optString("aliyun_key_2").isEmpty(),"gemini_key",!credentials.optString("gemini_key").isEmpty()),"options",object("subtitle_provider","aliyun","aliyun_region",credentials.optString("aliyun_region","beijing"),"dictionary_provider",credentials.optString("dictionary_provider","auto"),"translation_provider",credentials.optString("translation_provider","gemini")),"dictionary_route",dictionaryProvider())); return;
+            json(output,object("configured",object("aliyun_key_1",!credentials.optString("aliyun_key_1").isEmpty(),"aliyun_key_2",!credentials.optString("aliyun_key_2").isEmpty(),"gemini_key",!credentials.optString("gemini_key").isEmpty()),"options",object("subtitle_provider","aliyun","aliyun_region",credentials.optString("aliyun_region","beijing"),"dictionary_provider",credentials.optString("dictionary_provider","auto"),"translation_provider",credentials.optString("translation_provider","gemini"),"tutor_provider",credentials.optString("tutor_provider","qwen")),"dictionary_route",dictionaryProvider())); return;
         }
         String country=r.q("country").isEmpty()?"us":r.q("country");
         if(r.path.equals("/api/top-charts")) {
@@ -182,7 +185,14 @@ public final class NativeBackend implements AutoCloseable {
             String prompt;
             try { prompt=TutorPrompt.build(r.body); }
             catch(IllegalArgumentException e) { response(output,400,"application/json",bytes(object("detail",e.getMessage()).toString()));return; }
-            json(output,object("status","success","answer",gemini(prompt,false)));return;
+            String provider=credentials.optString("tutor_provider","qwen");
+            boolean configured=provider.equals("qwen")?(!credentials.optString("aliyun_key_1").trim().isEmpty()||!credentials.optString("aliyun_key_2").trim().isEmpty()):!credentials.optString("gemini_key").trim().isEmpty();
+            if(!configured){json(output,object("status","error","message","助教服务未配置，请检查设置。"));return;}
+            try {String answer=provider.equals("qwen")?qwenJson(prompt,"助教",false):gemini(prompt,false);
+                if(answer.trim().isEmpty())json(output,object("status","error","message","助教未返回回答，请重试。"));
+                else json(output,object("status","success","provider",provider,"answer",answer));}
+            catch(Exception error){json(output,object("status","error","message","助教请求失败，请检查网络和助教模型设置后重试。"));}
+            return;
         }
         if(r.path.equals("/api/translate_subtitles") && r.method.equals("POST")) {
             JSONArray sentences;
@@ -405,15 +415,21 @@ public final class NativeBackend implements AutoCloseable {
         }
     }
     private String qwenDictionary(String prompt) throws Exception { return qwenJson(prompt,"查词"); }
-    private String qwenJson(String prompt,String purpose) throws Exception {
+    private String qwenJson(String prompt,String purpose) throws Exception { return qwenJson(prompt,purpose,true); }
+    static JSONObject qwenPayload(String prompt,boolean jsonOutput) throws Exception {
+        JSONObject payload=object("model","qwen-flash","enable_thinking",false,
+            "messages",new JSONArray().put(object("role","user","content",prompt)));
+        if(jsonOutput)payload.put("response_format",object("type","json_object"));
+        return payload;
+    }
+    private String qwenJson(String prompt,String purpose,boolean jsonOutput) throws Exception {
         JSONObject config=credentials;
         List<String> keys=new ArrayList<>();
         for(String name:new String[]{"aliyun_key_1","aliyun_key_2"}){String key=config.optString(name).trim();if(!key.isEmpty()&&!keys.contains(key))keys.add(key);}
         if(keys.isEmpty())throw new AliyunStream.Failure("请在设置中填写阿里云百炼 Key。",false);
         String region=config.optString("aliyun_region","beijing");
         String host=region.equals("singapore")?"dashscope-intl.aliyuncs.com":"dashscope.aliyuncs.com";
-        JSONObject payload=object("model","qwen-flash","enable_thinking",false,"response_format",object("type","json_object"),
-            "messages",new JSONArray().put(object("role","user","content",prompt)));
+        JSONObject payload=qwenPayload(prompt,jsonOutput);
         okhttp3.Request request=new okhttp3.Request.Builder().url("https://"+host+"/compatible-mode/v1/chat/completions")
             .header("Authorization","Bearer "+keys.get(Math.floorMod(dictionaryKey.getAndIncrement(),keys.size())))
             .post(okhttp3.RequestBody.create(bytes(payload.toString()),okhttp3.MediaType.get("application/json"))).build();

@@ -18,7 +18,7 @@ Android 播放控制栏的 Loop 同排提供「分享字幕」，使用系统 Sh
 
 Web 保留 SRT、VTT 和 TXT 导出，同位置提供打印预览，自动收集节目标题、作者、简介、音频来源、整理时间、字幕状态和时间戳，按 A4 分页，可打印或保存 PDF。
 
-设置里的「查词模型」默认自动路由：每次查词检测当前 VPN / 系统 HTTP 代理，开启时调用 Gemini，关闭时调用 Qwen；无需重启。也可手动固定 Qwen 或 Gemini。Qwen 使用 `qwen-flash` 非思考模式和 JSON 输出，复用两把阿里云 Key 并交替查词；选择保存在设备加密配置中。AI 助教仍使用 Gemini。北京地域的 ASR 和 Qwen 查词同时绑定底层网络的 DNS 与 Socket，不受全局代理路由影响（VPN 需允许绕过）。代理开启不代表 Gemini 一定可访问；连接或权限错误正常提示。
+设置里的「查词模型」默认自动路由：每次查词检测当前 VPN / 系统 HTTP 代理，开启时调用 Gemini，关闭时调用 Qwen；无需重启。也可手动固定 Qwen 或 Gemini。Qwen 使用 `qwen-flash` 非思考模式和 JSON 输出，复用两把阿里云 Key 并交替查词；选择保存在设备加密配置中。AI 助教默认使用阿里云 Qwen，可在设置中的「助教模型」切换为 Gemini。北京地域的 ASR 和 Qwen 查词同时绑定底层网络的 DNS 与 Socket，不受全局代理路由影响（VPN 需允许绕过）。代理开启不代表 Gemini 一定可访问；连接或权限错误正常提示。
 
 MediaExtractor / MediaCodec 持续解码为 16 kHz 单声道 PCM，每约 100 毫秒通过 OkHttp WebSocket 上传 `qwen-audio-3.0-asr-flash-streaming`。前 5 分钟每 30 秒一个任务，之后逐渐延长。两把 Key 交替，最多两个任务并行；词时间戳按句末标点合并，未完成句子及断点原子保存。断线从断点继续，不重新上传已完成范围。
 
@@ -41,3 +41,5 @@ python android/install.py 设备序列号
 APK：`android/app/build/outputs/apk/debug/app-debug.apk`。Web 和 Android 使用各自缓存；阿里云缓存与旧 Groq 缓存分开。
 
 点击字幕栏的「双语字幕」按钮可提交当前字幕翻译，中文逐句显示在原文下方；开启后自动翻译后续字幕，再次点击关闭中文显示。设置中的「翻译模型」可选阿里云 Qwen 或 Gemini（默认 Gemini），分别复用已有阿里云和 Gemini 配置。更换模型或刷新字幕后重新翻译，单句修正只重译变化的句子；翻译失败保留原文，点击按钮重试。翻译不改变播放位置和暂停状态。
+
+错误与操作提示在页面顶部固定显示，不再从底部滑出；Android 分享失败也使用相同提示。助教、翻译和查词的模型选择分别保存。

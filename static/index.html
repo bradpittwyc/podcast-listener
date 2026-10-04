@@ -697,6 +697,16 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
 .sub-line:hover .save-btn, .save-btn.saved { opacity: 1; }
 .save-btn:hover { background: rgba(245,158,11,.12); border-color: rgba(245,158,11,.35); color: var(--amber); }
 .save-btn.saved { color: var(--amber); border-color: rgba(245,158,11,.35); background: rgba(245,158,11,.09); }
+.cue-actions{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.save-btn.sentence-save-btn{opacity:1;width:86px;height:36px;margin-top:0;gap:6px;padding:0 8px;font-size:12px;font-weight:600;color:var(--purple-light);border-color:rgba(168,85,247,.5);background:rgba(168,85,247,.16);border-radius:8px}
+.save-btn.sentence-save-btn:hover{background:rgba(168,85,247,.27);border-color:var(--purple)}
+.save-btn.sentence-save-btn.saved{color:var(--amber);border-color:rgba(245,158,11,.65);background:rgba(245,158,11,.2)}
+@media(max-width:1180px){.save-btn.sentence-save-btn{height:44px}}
+@media(max-width:600px){
+    .sub-line{display:grid;grid-template-columns:16px 40px minmax(0,1fr)}
+    .sub-line .cue-actions{grid-column:3;justify-self:end}
+    .save-btn.sentence-save-btn{width:94px;font-size:13px}
+}
 
 /* Welcome Screen */
 .welcome-screen {
@@ -1008,16 +1018,16 @@ body.android-runtime .android-only{display:inline-flex!important}
 .dict-def { font-size: 12px; color: var(--text2); line-height: 1.5; margin-bottom: 4px; }
 .dict-ex { font-size: 10.5px; color: var(--text3); font-style: italic; border-left: 2px solid var(--border); padding-left: 6px; }
 
-.toast-wrap { position: fixed; bottom: 18px; right: 18px; z-index: 300; display: flex; flex-direction: column; gap: 6px; }
+.toast-wrap { position: fixed; top: max(12px,env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); width: max-content; max-width: calc(100vw - 24px); z-index: 300; display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
 .toast {
     background: rgba(18,18,30,.97); backdrop-filter: blur(16px);
     border: 1px solid var(--border); padding: 9px 14px; border-radius: 9px;
     font-size: 12px; color: var(--text); display: flex; align-items: center; gap: 8px;
-    box-shadow: 0 6px 20px rgba(0,0,0,.4); animation: slideIn .2s ease; max-width: 320px;
+    box-shadow: 0 6px 20px rgba(0,0,0,.4); max-width: min(480px,calc(100vw - 24px)); overflow-wrap: anywhere;
 }
 .toast.success { border-left: 3px solid var(--green); }
 .toast.info { border-left: 3px solid var(--purple); }
-@keyframes slideIn{from{transform:translateX(18px);opacity:0;}to{transform:translateX(0);opacity:1;}}
+@media(max-width:600px){.toast-wrap{top:calc(52px + env(safe-area-inset-top,0px))}}
 
 .spinner { width: 24px; height: 24px; border: 2px solid var(--border); border-top-color: var(--purple); border-radius: 50%; animation: spin .8s linear infinite; margin: 30px auto; }
 @keyframes spin{to{transform:rotate(360deg);}}
@@ -1226,6 +1236,7 @@ body.android-runtime .android-only{display:inline-flex!important}
         <label for="aliyunRegion">阿里云地域</label><select id="aliyunRegion"><option value="beijing">中国内地 · 北京</option><option value="singapore">国际站 · 新加坡</option></select>
         <label for="dictionaryProvider">查词模型</label><select id="dictionaryProvider"><option value="auto">自动：开启代理用 Gemini，关闭用 Qwen</option><option value="qwen">阿里云 Qwen</option><option value="gemini">Gemini</option></select>
         <label for="translationProvider">翻译模型</label><select id="translationProvider"><option value="gemini">Gemini</option><option value="qwen">阿里云 Qwen</option></select>
+        <label for="tutorProvider">助教模型</label><select id="tutorProvider"><option value="qwen">阿里云 Qwen</option><option value="gemini">Gemini</option></select>
         <label for="aliyunKey1">阿里云百炼 API Key 1</label><input id="aliyunKey1" type="password" autocomplete="new-password" spellcheck="false">
         <label for="aliyunKey2">阿里云百炼 API Key 2</label><input id="aliyunKey2" type="password" autocomplete="new-password" spellcheck="false">
         <label for="geminiKey">Gemini API Key（AI 聊天）</label><input id="geminiKey" type="password" autocomplete="new-password" spellcheck="false">
@@ -1410,7 +1421,7 @@ body.android-runtime .android-only{display:inline-flex!important}
 <audio id="ga"></audio>
 
 <!-- Toast Wrap -->
-<div class="toast-wrap" id="toastWrap"></div>
+<div class="toast-wrap" id="toastWrap" role="status" aria-live="polite" aria-atomic="true"></div>
 
 <script>
 // ══════════════════════════════════════════════
@@ -2245,9 +2256,8 @@ function triggerAiTranscribe(auto = false, resume = false) {
         cancelTranscriptionJob(jobId);
         finish();
         setBadge('转写失败', 'rgba(245,158,11,.15)', '#fbbf24', 'rgba(245,158,11,.3)');
-        toast(detail, 'info');
         if (!cues.length && subScr) {
-            subScr.textContent = detail;
+            subScr.textContent = retryable ? '字幕连接中断，正在重试。' : '字幕加载失败，请检查设置后重试。';
             audio.pause();
         }
         if (retryable && reconnectAttempts < 5 && totalTranscriptionRetries < 20) {
@@ -2375,14 +2385,14 @@ function renderSubs() {
             <input type="checkbox" class="cue-check" data-idx="${i}" ${isChecked ? 'checked' : ''} onclick="event.stopPropagation()" onchange="onCueCheckChange(${i}, this.checked)" title="勾选送入 AI 提问框">
             <span class="sub-ts">${ft(c.start)}</span>
             <span class="sub-txt">${wordSpans(c.text, i)}${subtitleTranslationEnabled && subtitleTranslations.has(subtitleTranslationKey(c)) ? `<span class="sub-translation">${escHtml(subtitleTranslations.get(subtitleTranslationKey(c)))}</span>` : ''}</span>
-            <button class="save-btn" style="opacity:1" ${sentenceRetries.has(`${subtitleRequest}:${i}`) ? 'disabled' : ''}
+            <div class="cue-actions"><button class="save-btn" style="opacity:1" ${sentenceRetries.has(`${subtitleRequest}:${i}`) ? 'disabled' : ''}
                 onclick="regenerateSentence(event,${i})" title="重新识别这一句" aria-label="重新识别这一句">
                 <i class="fa-solid ${sentenceRetries.has(`${subtitleRequest}:${i}`) ? 'fa-spinner fa-spin' : 'fa-rotate'}"></i>
             </button>
-            <button class="save-btn ${saved ? 'saved' : ''}" id="sbtn-${i}"
-                onclick="saveSentence(event,${i})" title="${saved ? '已收藏' : '收藏到笔记本'}">
-                <i class="fa-${saved ? 'solid' : 'regular'} fa-bookmark"></i>
-            </button>
+            <button class="save-btn sentence-save-btn ${saved ? 'saved' : ''}" id="sbtn-${i}"
+                onclick="saveSentence(event,${i})" title="${saved ? '已收藏，点击取消收藏' : '收藏到笔记本'}" aria-label="${saved ? '取消收藏这句字幕' : '收藏这句字幕'}" aria-pressed="${saved}">
+                <i class="fa-${saved ? 'solid' : 'regular'} fa-bookmark" aria-hidden="true"></i><span>${saved ? '已收藏' : '收藏'}</span>
+            </button></div>
         </div>`;
     });
     el.innerHTML = h;
@@ -2888,8 +2898,11 @@ function saveSentence(e, idx) {
 function updateSaveBtn(idx, saved) {
     const btn = document.getElementById(`sbtn-${idx}`);
     if (!btn) return;
-    btn.className = `save-btn ${saved ? 'saved' : ''}`;
-    btn.innerHTML = `<i class="fa-${saved ? 'solid' : 'regular'} fa-bookmark"></i>`;
+    btn.className = `save-btn sentence-save-btn ${saved ? 'saved' : ''}`;
+    btn.innerHTML = `<i class="fa-${saved ? 'solid' : 'regular'} fa-bookmark" aria-hidden="true"></i><span>${saved ? '已收藏' : '收藏'}</span>`;
+    btn.title = saved ? '已收藏，点击取消收藏' : '收藏到笔记本';
+    btn.setAttribute?.('aria-pressed',String(saved));
+    btn.setAttribute?.('aria-label',saved ? '取消收藏这句字幕' : '收藏这句字幕');
 }
 
 function renderNotebook() {
@@ -3001,12 +3014,10 @@ function toast(msg, type = 'info') {
     if (!wrap) return;
     const el = document.createElement('div');
     el.className = `toast ${type}`;
-    el.innerHTML = `<i class="fa-solid ${type==='success' ? 'fa-circle-check' : 'fa-circle-info'}"></i> ${msg}`;
+    el.innerHTML = `<i class="fa-solid ${type==='success' ? 'fa-circle-check' : 'fa-circle-info'}"></i> ${escHtml(String(msg))}`;
     wrap.appendChild(el);
     setTimeout(() => {
-        el.style.opacity = '0';
-        el.style.transition = 'opacity .3s';
-        setTimeout(() => el.remove(), 300);
+        el.remove();
     }, 3200);
 }
 
@@ -3020,6 +3031,7 @@ function applyProviderSettings(options = {}) {
     document.getElementById('dictionaryProvider').value = options.dictionary_provider || 'auto';
     const translation = options.translation_provider || 'gemini';
     document.getElementById('translationProvider').value = translation;
+    document.getElementById('tutorProvider').value = options.tutor_provider || 'qwen';
     if (translation !== subtitleTranslationProvider) {
         subtitleTranslationProvider = translation;
         resetSubtitleTranslations(subtitleTranslationEnabled);
@@ -3108,6 +3120,7 @@ async function saveApiSettings(event) {
     body.aliyun_region = document.getElementById('aliyunRegion').value;
     body.dictionary_provider = document.getElementById('dictionaryProvider').value;
     body.translation_provider = document.getElementById('translationProvider').value || 'gemini';
+    body.tutor_provider = document.getElementById('tutorProvider').value || 'qwen';
     try {
         const response = await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
         if (!response.ok) throw new Error();

@@ -6,6 +6,13 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class NativeBackendTest {
+    @Test public void tutorAllowsPlainTextWhileDictionaryAndTranslationRequestJson() throws Exception {
+        org.json.JSONObject tutor=NativeBackend.qwenPayload("Explain the subtitles",false);
+        assertFalse(tutor.has("response_format"));
+        assertEquals("qwen-flash",tutor.getString("model"));
+        assertEquals("Explain the subtitles",tutor.getJSONArray("messages").getJSONObject(0).getString("content"));
+        assertEquals("json_object",NativeBackend.qwenPayload("Translate",true).getJSONObject("response_format").getString("type"));
+    }
     @Test public void automaticDictionaryTracksProxyChanges() {
         assertEquals("qwen",NativeBackend.chooseDictionaryProvider("auto",false));
         assertEquals("gemini",NativeBackend.chooseDictionaryProvider("auto",true));

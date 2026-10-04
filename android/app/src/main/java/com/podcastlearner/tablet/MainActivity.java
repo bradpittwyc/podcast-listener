@@ -90,11 +90,11 @@ public class MainActivity extends Activity {
                         runOnUiThread(()->{
                             sharing.set(false);if(destroyed)return;
                             try{startActivity(android.content.Intent.createChooser(intent,"分享字幕到"));}
-                            catch(Exception e){android.widget.Toast.makeText(MainActivity.this,"无法打开系统分享面板",android.widget.Toast.LENGTH_SHORT).show();}
+                            catch(Exception e){web.evaluateJavascript("toast('无法打开系统分享面板','info')",null);}
                         });
                     } catch(Exception e) {
                         sharing.set(false);
-                        runOnUiThread(()->{if(!destroyed)android.widget.Toast.makeText(MainActivity.this,"字幕文稿准备失败，请重试",android.widget.Toast.LENGTH_SHORT).show();});
+                        runOnUiThread(()->{if(!destroyed)web.evaluateJavascript("toast('字幕文稿准备失败，请重试','info')",null);});
                     }
                 },"subtitle-share").start();
             }

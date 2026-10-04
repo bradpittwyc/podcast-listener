@@ -14,6 +14,9 @@ import transcription as stt
 
 class TranscriptionTests(unittest.TestCase):
     def setUp(self):
+        tutor = patch.dict(os.environ, {"TUTOR_PROVIDER": "gemini"})
+        tutor.start()
+        self.addCleanup(tutor.stop)
         keys = patch.dict(os.environ, {"DASHSCOPE_API_KEY": "", "DASHSCOPE_API_KEY_1": "", "DASHSCOPE_API_KEY_2": ""})
         keys.start()
         self.addCleanup(keys.stop)

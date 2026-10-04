@@ -546,3 +546,19 @@ test('changing the translation model invalidates existing translations', async (
     await settleTranslation();assert.ok(p.run('subtitleTranslationEpoch')>epoch);
     assert.equal(p.run('subtitleTranslationProvider'),'qwen');assert.equal(p.run('translationRequests.length'),2);
 });
+
+
+test('transcription failures recover without displaying transient error notices', () => {
+    const p=player();p.start();p.run('globalThis.notices=[];toast=message=>notices.push(message)');
+    p.streams[0].emit({status:'error',detail:'阿里云暂时失败，正在从断点重连。',retryable:true});
+    assert.equal(p.run('notices.length'),0);assert.ok(p.timers.some(timer=>!timer.cleared));
+    assert.doesNotMatch(p.elements.get('subScroll').textContent,/阿里云/);
+});
+
+test('tutor model is loaded and saved separately from translation', async () => {
+    const p=player();p.run("applyProviderSettings({tutor_provider:'gemini',translation_provider:'qwen'})");
+    assert.equal(p.elements.get('tutorProvider').value,'gemini');
+    p.elements.get('tutorProvider').value='qwen';await p.run('saveApiSettings({preventDefault(){}})');
+    const body=JSON.parse(p.fetchCalls[0][1].body);
+    assert.equal(body.tutor_provider,'qwen');assert.equal(body.translation_provider,'qwen');
+});
