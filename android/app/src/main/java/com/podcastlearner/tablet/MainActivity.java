@@ -66,7 +66,7 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams appNameParams=new LinearLayout.LayoutParams(-2,-2);appNameParams.topMargin=dp(18);
         brand.addView(appName,appNameParams);
         TextView slogan=new TextView(this);
-        slogan.setText("Live   in the Language");slogan.setTextColor(0xffc084fc);
+        slogan.setText("Live in the Language");slogan.setTextColor(0xffc084fc);
         slogan.setTextSize(getResources().getConfiguration().smallestScreenWidthDp>=600?24:19);
         slogan.setTypeface(Typeface.create("Microsoft YaHei",Typeface.BOLD));slogan.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams sloganParams=new LinearLayout.LayoutParams(-2,-2);sloganParams.topMargin=dp(12);
