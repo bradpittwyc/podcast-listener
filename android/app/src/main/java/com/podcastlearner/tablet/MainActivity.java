@@ -45,7 +45,7 @@ public class MainActivity extends Activity {
         LinearLayout brand=new LinearLayout(this);
         brand.setOrientation(LinearLayout.VERTICAL);brand.setGravity(Gravity.CENTER);
         ImageView icon=new ImageView(this);icon.setImageResource(R.drawable.ic_podcast);
-        GradientDrawable iconShape=new GradientDrawable();iconShape.setColor(0xffa855f7);iconShape.setCornerRadius(dp(28));
+        GradientDrawable iconShape=new GradientDrawable();iconShape.setColor(0xff15101f);iconShape.setCornerRadius(dp(28));iconShape.setStroke(dp(1),0xff40234f);
         icon.setBackground(iconShape);icon.setClipToOutline(true);icon.setElevation(dp(12));
         brand.addView(icon,new LinearLayout.LayoutParams(dp(112),dp(112)));
         TextView motto=new TextView(this);motto.setText("Live in the Language");
@@ -103,15 +103,9 @@ public class MainActivity extends Activity {
                 if (request.isForMainFrame()) { pageFailed=true;pageLoaded=false; showError("启动暂未完成，请稍后重试。"); }
             }
             @Override public void onPageFinished(WebView view, String url) {
-                if (!pageFailed && url.startsWith(server + "/")) {
-                    pageLoaded=true;
-                    web.evaluateJavascript("window.androidNativeRuntime=true;document.body.classList.add('android-runtime');restoreAndroidPlaybackState()",null);
-                    status.setVisibility(View.GONE);
-                    retry.setVisibility(View.GONE);
-                    long remaining=Math.max(0,900-(android.os.SystemClock.uptimeMillis()-splashStarted));
-                    splash.postDelayed(()->{if(!destroyed && pageLoaded && !pageFailed)splash.animate().alpha(0).setDuration(250).withEndAction(()->splash.setVisibility(View.GONE)).start();},remaining);
-                }
+                showReadyPage(url);
             }
+            @Override public void onPageCommitVisible(WebView view,String url){showReadyPage(url);}
         });
         layout.addView(web,new FrameLayout.LayoutParams(-1,-1));
         layout.addView(splash,new FrameLayout.LayoutParams(-1,-1));
@@ -129,7 +123,7 @@ public class MainActivity extends Activity {
             for(int attempt=0;attempt<30&&!destroyed;attempt++){
                 HttpURLConnection connection=null;
                 try {
-                    connection=(HttpURLConnection)new URL(server+"/api/runtime").openConnection();
+                    connection=(HttpURLConnection)new URL(server+"/api/runtime").openConnection(java.net.Proxy.NO_PROXY);
                     connection.setConnectTimeout(500);connection.setReadTimeout(500);
                     ready=connection.getResponseCode()==200;
                     if(ready)break;
@@ -153,6 +147,14 @@ public class MainActivity extends Activity {
         super.onPause();
     }
     private int dp(float value){return Math.round(value*getResources().getDisplayMetrics().density);}
+    private void showReadyPage(String url){
+        if(destroyed || pageFailed || pageLoaded || !url.startsWith(server+"/"))return;
+        pageLoaded=true;
+        web.evaluateJavascript("(()=>{const ready=()=>{window.androidNativeRuntime=true;document.body.classList.add('android-runtime');if(typeof restoreAndroidPlaybackState==='function')restoreAndroidPlaybackState();};if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',ready,{once:true});else ready();})()",null);
+        status.setVisibility(View.GONE);retry.setVisibility(View.GONE);
+        long remaining=Math.max(0,900-(android.os.SystemClock.uptimeMillis()-splashStarted));
+        splash.postDelayed(()->{if(!destroyed && pageLoaded && !pageFailed)splash.animate().alpha(0).setDuration(250).withEndAction(()->splash.setVisibility(View.GONE)).start();},remaining);
+    }
     private void showError(String text) {splash.animate().cancel();splash.setAlpha(1);splash.setVisibility(View.VISIBLE);loading.setVisibility(View.GONE);status.setVisibility(View.VISIBLE);status.setText(text);retry.setVisibility(View.VISIBLE);}
     @Override public void onBackPressed() {
         web.evaluateJavascript("(function(){var d=document.getElementById('settingsDialog');if(d&&d.open){closeSettings();return;}if(document.getElementById('colLeft').classList.contains('collapsed')){expandSidebar();}})()",null);
