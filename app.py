@@ -48,7 +48,6 @@ STATIC_DIR = os.path.join(BASE_DIR, "static")
 os.makedirs(STATIC_DIR, exist_ok=True)
 
 app.mount("/cache", StaticFiles(directory=CACHE_DIR), name="cache")
-app.mount("/assets", StaticFiles(directory=os.path.join(STATIC_DIR, "assets")), name="assets")
 
 SETTINGS_PATH = os.path.join(BASE_DIR, ".env")
 settings_lock = threading.Lock()
