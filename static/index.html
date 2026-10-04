@@ -133,10 +133,43 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
     display: flex;
     flex-direction: column;
     height: 100vh;
-    overflow: hidden;
+    overflow: visible;
+    position: relative;
     z-index: 10;
     flex-shrink: 0;
 }
+.ai-panel-shell {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 100%;
+    height: 100%;
+    background: var(--panel-right-bg);
+    border-left: 1px solid var(--border);
+}
+.col-right.ai-expanded { z-index: 50; }
+.col-right.ai-expanded .ai-panel-shell {
+    width: calc(100vw * 2 / 3);
+    box-shadow: -16px 0 40px rgba(0,0,0,.4);
+}
+.ai-expand-btn {
+    position: absolute;
+    left: -14px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 26px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(168,85,247,.4);
+    border-radius: 9px;
+    background: var(--panel-right-bg);
+    color: var(--purple-light);
+    cursor: pointer;
+    z-index: 1;
+}
+.ai-expand-btn:hover { background: #241334; border-color: var(--purple); }
 
 /* ═══════════════════════════════ LEFT PANEL: PLAZA, EPISODES & PLAYER ═══════════════════════════════ */
 .left-top-area {
@@ -682,7 +715,7 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
     flex: 1;
     display: flex;
     flex-direction: column;
-    height: 100vh;
+    height: 100%;
     overflow: hidden;
 }
 .ai-hd {
@@ -1058,6 +1091,8 @@ body.android-runtime .android-only{display:inline-flex!important}
     .phone-toolbar button{height:40px;min-width:44px;border:0;background:transparent;color:var(--purple-light);font-size:14px}
     .col-mid{grid-row:2;width:100%;height:100%;border-right:0;min-height:0}
     .col-right{grid-row:3;width:100%;height:100%;min-height:0;border-top:1px solid var(--border)}
+    .col-right.ai-expanded .ai-panel-shell{width:100%;box-shadow:none}
+    .ai-expand-btn{display:none}
     .col-left{position:fixed;top:44px;bottom:0;left:0;width:min(340px,88vw);height:calc(100dvh - 44px);z-index:92;box-shadow:12px 0 40px rgba(0,0,0,.5)}
     .col-left.collapsed{display:none!important}
     .col-left:not(.collapsed) ~ .phone-scrim{display:block;position:fixed;inset:44px 0 0;z-index:91;border:0;background:rgba(0,0,0,.6)}
@@ -1279,12 +1314,13 @@ body.android-runtime .android-only{display:inline-flex!important}
 
 <!-- ═══════════════════════════════ COLUMN 3: RIGHT (~25vw) AI Q&A COPILOT ═══════════════════════════════ -->
 <section class="col-right" id="colRight">
+    <div class="ai-panel-shell" id="aiPanelShell">
+    <button class="ai-expand-btn" id="aiExpandBtn" type="button" onclick="toggleAiPanel()" title="向左展开助教" aria-label="向左展开助教" aria-expanded="false" aria-controls="aiPanelShell"><i class="fa-solid fa-chevron-left" id="aiExpandIcon" aria-hidden="true"></i></button>
     <div class="ai-section">
         <div class="ai-hd">
             <div class="ai-hd-title">
                 <i class="fa-solid fa-wand-magic-sparkles" style="color:var(--purple)"></i>
                 <span>AI 学习助教</span>
-                <span class="ai-badge">Gemini</span>
             </div>
             <div class="ai-hd-actions">
                 <button class="icon-btn" onclick="clearAiChat()" title="清空对话记录">
@@ -1322,6 +1358,7 @@ body.android-runtime .android-only{display:inline-flex!important}
                 </button>
             </div>
         </div>
+    </div>
     </div>
 </section>
 
@@ -1440,6 +1477,17 @@ let lastVolume = 1.0;
 //  COLLAPSIBLE SIDEBAR
 // ══════════════════════════════════════════════
 let isSidebarCollapsed = false;
+
+function toggleAiPanel() {
+    const panel = document.getElementById('colRight');
+    const expanded = panel.classList.toggle('ai-expanded');
+    const button = document.getElementById('aiExpandBtn');
+    const label = expanded ? '收回助教' : '向左展开助教';
+    button.setAttribute('aria-expanded', String(expanded));
+    button.setAttribute('aria-label', label);
+    button.title = label;
+    document.getElementById('aiExpandIcon').className = expanded ? 'fa-solid fa-chevron-right' : 'fa-solid fa-chevron-left';
+}
 
 function setSidebarCollapsed(collapsed) {
     isSidebarCollapsed = !!collapsed;
@@ -2764,6 +2812,8 @@ function alignBottomPanels() {
             document.documentElement.style.removeProperty('--footer-height');
             return;
         }
+        // Keep the subtitle/player layout stable while the tutor overlays it.
+        if (document.getElementById('colRight').classList.contains('ai-expanded')) return;
         document.documentElement.style.setProperty('--footer-height',Math.ceil(Math.max(...panels.map(naturalHeight))) + 'px');
     };
     update();
