@@ -183,7 +183,7 @@ public class MainActivity extends Activity {
         pageLoaded=true;
         web.evaluateJavascript("(()=>{const ready=()=>{window.androidNativeRuntime=true;document.body.classList.add('android-runtime');if(typeof restoreAndroidPlaybackState==='function')restoreAndroidPlaybackState();};if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',ready,{once:true});else ready();})()",null);
         status.setVisibility(View.GONE);retry.setVisibility(View.GONE);
-        long remaining=Math.max(0,900-(android.os.SystemClock.uptimeMillis()-splashStarted));
+        long remaining=Math.max(0,2000-(android.os.SystemClock.uptimeMillis()-splashStarted));
         splash.postDelayed(()->{if(!destroyed && pageLoaded && !pageFailed)splash.animate().alpha(0).setDuration(250).withEndAction(()->splash.setVisibility(View.GONE)).start();},remaining);
     }
     private void showError(String text) {splash.animate().cancel();splash.setAlpha(1);splash.setVisibility(View.VISIBLE);loading.setVisibility(View.GONE);status.setVisibility(View.VISIBLE);status.setText(text);retry.setVisibility(View.VISIBLE);}
