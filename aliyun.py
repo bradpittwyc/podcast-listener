@@ -22,7 +22,7 @@ def regenerate(audio_url, audio_path, start, end, stopped=None):
     if stopped.is_set(): raise ASRError('转写已取消。', retryable=False)
     keys = api_keys()
     if not keys:
-        raise ASRError('请在设置中填写阿里云百炼 API Key。', retryable=False)
+        raise ASRError('字幕服务未配置，请检查设置', retryable=False)
     with _retry_key_lock:
         key = keys[_retry_key_index % len(keys)]
         _retry_key_index += 1
@@ -356,14 +356,13 @@ def transcript_events(audio_url, audio_path, vtt_path, checkpoint_path, proxies,
     keys = api_keys()
     if not keys:
         from transcription import TranscriptionError
-        raise TranscriptionError("请在设置中填写阿里云百炼 API Key。", retryable=False)
+        raise TranscriptionError("字幕服务未配置，请检查设置", retryable=False)
     checkpoint = read_checkpoint(checkpoint_path)
     cues = list(checkpoint['cues']); resume = checkpoint['until']; index = checkpoint['next_chunk']
     pending_sentence = checkpoint.get('pending_sentence')
     # Replace browser state even at zero when migrating old paragraph-level caches.
     yield {'status': 'resumed', 'until': cues[-1]['end'] if pending_sentence and cues else (0 if pending_sentence else resume), 'cues': list(cues)}
     yield {'status': 'audio_source', 'audio_url': '/api/audio?url=' + requests.utils.quote(audio_url, safe='')}
-    yield {'status': 'progress', 'detail': '阿里云 Streaming：边下载边上传，稳定字幕就绪后播放。'}
     cancel = threading.Event(); tasks = queue.Queue(maxsize=2); active = []; failure = []
     audio_ended = threading.Event()
     capacity = threading.Semaphore(min(2, len(keys)))
@@ -433,7 +432,6 @@ def transcript_events(audio_url, audio_path, vtt_path, checkpoint_path, proxies,
             if task is None:
                 if failure: raise failure[0]
                 break
-            yield {'status': 'progress', 'detail': f'阿里云 Key {task.index % len(keys) + 1} 正在流式转写第 {task.index + 1} 段。'}
             while not signal.is_set():
                 if audio_ended.is_set() and not finishing_sent:
                     finishing_sent = True

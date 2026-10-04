@@ -10,6 +10,49 @@ from aliyun import api_keys
 
 
 class SettingsTests(unittest.TestCase):
+    def test_translation_provider_persists_and_rejects_unknown_models(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / '.env'
+            path.write_text('DASHSCOPE_API_KEY_1=old-key\n', encoding='utf-8')
+            with patch.object(app, 'BASE_DIR', directory), patch.object(app, 'SETTINGS_PATH', str(path)), patch.dict(os.environ, {}):
+                client = TestClient(app.app)
+                for provider in ('qwen', 'gemini'):
+                    self.assertEqual(client.post('/api/settings', json={'translation_provider': provider}).status_code, 200)
+                    self.assertEqual(client.get('/api/settings').json()['options']['translation_provider'], provider)
+                    self.assertIn('TRANSLATION_PROVIDER', path.read_text())
+                    self.assertIn('old-key', path.read_text())
+                self.assertEqual(client.post('/api/settings', json={'translation_provider': 'invalid'}).status_code, 400)
+
+    def test_tutor_defaults_to_qwen_and_choice_persists_independently(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / '.env'
+            path.write_text('PORT=8557\n', encoding='utf-8')
+            with patch.object(app, 'BASE_DIR', directory), patch.object(app, 'SETTINGS_PATH', str(path)), patch.dict(os.environ, {'TUTOR_PROVIDER':'', 'TRANSLATION_PROVIDER':'gemini'}):
+                client = TestClient(app.app)
+                self.assertEqual(client.get('/api/settings').json()['options']['tutor_provider'], 'qwen')
+                for provider in ('gemini', 'qwen'):
+                    self.assertEqual(client.post('/api/settings', json={'tutor_provider':provider}).status_code, 200)
+                    options = client.get('/api/settings').json()['options']
+                    self.assertEqual(options['tutor_provider'], provider)
+                    self.assertEqual(options['translation_provider'], 'gemini')
+                    self.assertIn('TUTOR_PROVIDER', path.read_text())
+                self.assertEqual(client.post('/api/settings', json={'tutor_provider':'invalid'}).status_code, 400)
+
+    def test_qwen_tutor_uses_plain_text_and_all_subtitle_context(self):
+        from unittest.mock import MagicMock
+        session = MagicMock()
+        session.__enter__.return_value = session
+        session.post.return_value.json.return_value = {'choices':[{'message':{'content':'助教回答'}}]}
+        with patch.dict(os.environ, {'TUTOR_PROVIDER':'qwen'}), patch.object(app.aliyun,'api_keys',return_value=['private-key']), patch.object(app.requests,'Session',return_value=session), patch.object(app,'gemini_client',None):
+            result = TestClient(app.app).post('/api/ask',json={'question':'Explain','full_transcript':'Current corrected sentence','selected_text':'Selected example','transcript_complete':False}).json()
+        self.assertEqual(result['provider'],'qwen')
+        self.assertEqual(result['answer'],'助教回答')
+        payload = session.post.call_args.kwargs['json']
+        self.assertNotIn('response_format',payload)
+        self.assertEqual(payload['model'],'qwen-flash')
+        self.assertIn('Current corrected sentence',payload['messages'][0]['content'])
+        self.assertIn('Selected example',payload['messages'][0]['content'])
+
     def test_save_keeps_other_settings_and_does_not_return_secrets(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / '.env'

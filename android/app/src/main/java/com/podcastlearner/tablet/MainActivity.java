@@ -1,6 +1,7 @@
 package com.podcastlearner.tablet;
 
 import android.app.Activity;
+import android.content.pm.ActivityInfo;
 import android.os.Bundle;
 import android.view.View;
 import android.webkit.WebResourceRequest;
@@ -15,6 +16,8 @@ import android.widget.ImageView;
 import android.widget.ProgressBar;
 import android.view.Gravity;
 import android.graphics.Typeface;
+import android.graphics.LinearGradient;
+import android.graphics.Shader;
 import android.graphics.drawable.GradientDrawable;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -35,6 +38,9 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
+        if (getResources().getConfiguration().smallestScreenWidthDp < 600) {
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+        }
         getWindow().setStatusBarColor(0xff0d0d18);
         getWindow().setNavigationBarColor(0xff0d0d18);
         layout = new FrameLayout(this);
@@ -48,11 +54,27 @@ public class MainActivity extends Activity {
         GradientDrawable iconShape=new GradientDrawable();iconShape.setColor(0xff15101f);iconShape.setCornerRadius(dp(28));iconShape.setStroke(dp(1),0xff40234f);
         icon.setBackground(iconShape);icon.setClipToOutline(true);icon.setElevation(dp(12));
         brand.addView(icon,new LinearLayout.LayoutParams(dp(112),dp(112)));
-        TextView motto=new TextView(this);motto.setText("Live in the Language");
-        motto.setTextColor(0xfff1eafa);motto.setTextSize(22);motto.setTypeface(Typeface.create("sans-serif-light",Typeface.NORMAL));
-        motto.setLetterSpacing(.045f);motto.setGravity(Gravity.CENTER);
+        TextView motto=new TextView(this);motto.setText("Live in the");
+        motto.setTextColor(0xffe6dced);motto.setTextSize(25);motto.setTypeface(Typeface.create("sans-serif-light",Typeface.NORMAL));
+        motto.setLetterSpacing(.09f);motto.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams mottoParams=new LinearLayout.LayoutParams(-2,-2);mottoParams.topMargin=dp(28);
         brand.addView(motto,mottoParams);
+        TextView language=new TextView(this){
+            @Override protected void onSizeChanged(int w,int h,int oldw,int oldh){
+                super.onSizeChanged(w,h,oldw,oldh);
+                getPaint().setShader(new LinearGradient(0,0,w,h,new int[]{0xffe9d5ff,0xffc084fc,0xfff0abfc},null,Shader.TileMode.CLAMP));
+            }
+        };
+        language.setText("Language");language.setTextColor(0xffffffff);language.setTextSize(getResources().getConfiguration().smallestScreenWidthDp>=600?52:44);
+        language.setTypeface(Typeface.create("serif",Typeface.ITALIC));language.setLetterSpacing(-.025f);
+        language.setGravity(Gravity.CENTER);language.setIncludeFontPadding(false);language.setPadding(dp(8),0,dp(8),dp(6));
+        language.setContentDescription("Language");
+        LinearLayout.LayoutParams languageParams=new LinearLayout.LayoutParams(-2,-2);languageParams.topMargin=dp(2);
+        brand.addView(language,languageParams);
+        View accent=new View(this);
+        accent.setBackground(new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,new int[]{0xffc084fc,0xfff0abfc}));
+        LinearLayout.LayoutParams accentParams=new LinearLayout.LayoutParams(dp(44),dp(1));accentParams.topMargin=dp(18);
+        brand.addView(accent,accentParams);
         loading=new ProgressBar(this,null,android.R.attr.progressBarStyleSmall);
         loading.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(0xffc084fc));
         LinearLayout.LayoutParams loadingParams=new LinearLayout.LayoutParams(dp(20),dp(20));loadingParams.topMargin=dp(32);
@@ -86,11 +108,11 @@ public class MainActivity extends Activity {
                         runOnUiThread(()->{
                             sharing.set(false);if(destroyed)return;
                             try{startActivity(android.content.Intent.createChooser(intent,"分享字幕到"));}
-                            catch(Exception e){android.widget.Toast.makeText(MainActivity.this,"无法打开系统分享面板",android.widget.Toast.LENGTH_SHORT).show();}
+                            catch(Exception e){web.evaluateJavascript("toast('无法打开系统分享面板','info')",null);}
                         });
                     } catch(Exception e) {
                         sharing.set(false);
-                        runOnUiThread(()->{if(!destroyed)android.widget.Toast.makeText(MainActivity.this,"字幕文稿准备失败，请重试",android.widget.Toast.LENGTH_SHORT).show();});
+                        runOnUiThread(()->{if(!destroyed)web.evaluateJavascript("toast('字幕文稿准备失败，请重试','info')",null);});
                     }
                 },"subtitle-share").start();
             }
@@ -157,7 +179,11 @@ public class MainActivity extends Activity {
     }
     private void showError(String text) {splash.animate().cancel();splash.setAlpha(1);splash.setVisibility(View.VISIBLE);loading.setVisibility(View.GONE);status.setVisibility(View.VISIBLE);status.setText(text);retry.setVisibility(View.VISIBLE);}
     @Override public void onBackPressed() {
-        web.evaluateJavascript("(function(){var d=document.getElementById('settingsDialog');if(d&&d.open){closeSettings();return;}if(document.getElementById('colLeft').classList.contains('collapsed')){expandSidebar();}})()",null);
+        web.evaluateJavascript("(function(){var d=document.getElementById('settingsDialog');if(d&&d.open){closeSettings();return true;}if(document.getElementById('colLeft').classList.contains('collapsed')||document.getElementById('tab-plaza').style.display==='none'){showTab('plaza');expandSidebar();return true;}return false;})()",handled -> {
+            if (!destroyed && "false".equals(handled) && getResources().getConfiguration().smallestScreenWidthDp < 600) {
+                moveTaskToBack(true);
+            }
+        });
     }
     @Override protected void onDestroy() { destroyed=true; web.destroy(); super.onDestroy(); }
 }

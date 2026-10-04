@@ -1,4 +1,5 @@
 import os
+import asyncio
 import re
 import json
 import tempfile
@@ -7,6 +8,7 @@ import math
 import shutil
 import aliyun
 import corrections
+import subtitle_translation
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -53,6 +55,8 @@ corrections_lock = threading.Lock()
 KEY_FIELDS = {"gemini_key": "GEMINI_API_KEY",
               "aliyun_key_1": "DASHSCOPE_API_KEY_1", "aliyun_key_2": "DASHSCOPE_API_KEY_2"}
 OPTION_FIELDS = {"subtitle_provider": ("AI_PROVIDER", ("aliyun",)),
+                 "tutor_provider": ("TUTOR_PROVIDER", ("qwen", "gemini")),
+                 "translation_provider": ("TRANSLATION_PROVIDER", ("gemini", "qwen")),
                  "dictionary_provider": ("DICTIONARY_PROVIDER", ("auto", "qwen", "gemini")),
                  "aliyun_region": ("ALIYUN_REGION", ("beijing", "singapore"))}
 
@@ -421,11 +425,11 @@ def define_word(word: str = Query(..., min_length=1), context: str = ""):
 @app.post("/api/ask")
 async def ask_podcast_ai(request: Request):
     """
-    Use Gemini AI to answer user questions about the podcast or selected subtitle lines.
-    Automatically retrieves the full transcript from cache or client payload.
+    Use the selected tutor model with the client's current subtitle snapshot.
     """
-    if not gemini_client:
-        return {"status": "error", "message": "GEMINI_API_KEY 环境变量未配置，请在 .env 中设置"}
+    provider = provider_settings()["tutor_provider"]
+    if (provider == "gemini" and not gemini_client) or (provider == "qwen" and not aliyun.api_keys()):
+        return {"status": "error", "message": "助教服务未配置，请检查设置。"}
 
     try:
         body = await request.json()
@@ -434,8 +438,6 @@ async def ask_podcast_ai(request: Request):
 
     if not isinstance(body, dict) or any(not isinstance(body.get(name, ""), str) for name in ("question", "selected_text", "audio_url", "full_transcript")):
         raise HTTPException(status_code=400, detail="Invalid question fields")
-    if body.get("transcript_complete") is not True:
-        raise HTTPException(status_code=409, detail="请等待全篇字幕加载完成后再提问。")
 
     question = (body.get("question") or "").strip()
     selected_text = (body.get("selected_text") or "").strip()
@@ -445,9 +447,9 @@ async def ask_podcast_ai(request: Request):
     if not question and not selected_text:
         return {"status": "error", "message": "提问内容或勾选的字幕不能同时为空"}
 
-    # 1. 尝试从本地缓存读取全篇转写 VTT
-    transcript_text = ""
-    if audio_url:
+    # Use the exact subtitle snapshot submitted by the player, including corrections.
+    transcript_text = client_transcript
+    if not transcript_text and audio_url:
         try:
             _, _, vtt_path = cache_paths(CACHE_DIR, audio_url)
             if vtt_path.exists():
@@ -462,19 +464,17 @@ async def ask_podcast_ai(request: Request):
         except Exception as e:
             print("Failed to read VTT cache for Q&A:", e)
 
-    # 2. 如果缓存中没有（比如正在流式转写中），使用前端传来的已就绪字幕全文
-    if not transcript_text and client_transcript:
-        transcript_text = client_transcript
-
     if not transcript_text:
-        raise HTTPException(status_code=409, detail="缺少完整字幕，请加载字幕后重试。")
-    # Include the whole completed transcript; never silently cut off its ending.
+        raise HTTPException(status_code=409, detail="请等待首条字幕加载后提问。")
+    # Include all currently available subtitles without truncation.
     bg_context = transcript_text
+    transcript_status = "本期字幕已全部转写完成。" if body.get("transcript_complete") is True else "本期字幕仍在转写，以下仅为当前已获得的全部内容；回答应基于这些内容，不要推测尚未获得的部分。"
     quote_section = f"【用户勾选引用的字幕语句】:\n{selected_text}\n" if selected_text else ""
     user_query = question if question else "请详细解析上述勾选字幕句子的语法结构、生词习语和地道用法。"
 
     prompt = f"""你是一个专业、耐心的英语播客学习助教。
-用户正在边听播客边学习，并向你提问。以下是这期播客的字幕/转写全文背景：
+用户正在边听播客边学习，并向你提问。{transcript_status}
+以下是当前已获得的全部字幕背景：
 --- 播客背景转写 ---
 {bg_context}
 --- 背景结束 ---
@@ -486,20 +486,65 @@ async def ask_podcast_ai(request: Request):
 请结合播客的上下文，给出清晰、详实、通俗易懂的解答：
 1. 若涉及生词或短语：说明其在此处播客语境中的确切含义与地道用法，并给出生动的例句；
 2. 若涉及复杂句式或语法：拆解句子结构并进行通俗解释；
-3. 若询问播客内容或背景：结合转写全文进行提炼和解释。
+3. 若询问播客内容或背景：结合当前已获得的全部字幕进行提炼和解释。
 回答使用流畅自然的中文，可适当使用 Markdown 格式（粗体、列表、引用等），便于排版阅读。"""
 
     try:
-        model_name = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
-        response = await gemini_client.aio.models.generate_content(
-            model=model_name,
-            contents=prompt,
-        )
-        answer = (response.text or "").strip()
-        return {"status": "success", "answer": answer}
-    except Exception as e:
-        print("Gemini Q&A error:", str(e))
-        return {"status": "error", "message": str(e)}
+        if provider == "qwen":
+            answer = (await asyncio.to_thread(qwen_completion, prompt, False)).strip()
+        else:
+            response = await asyncio.wait_for(gemini_client.aio.models.generate_content(
+                model=os.environ.get("GEMINI_MODEL", "gemini-3.5-flash"), contents=prompt,
+            ), timeout=150)
+            answer = (response.text or "").strip()
+        if not answer:
+            return {"status": "error", "message": "助教未返回回答，请重试。"}
+        return {"status": "success", "provider": provider, "answer": answer}
+    except Exception:
+        return {"status": "error", "message": "助教请求失败，请检查网络和助教模型设置后重试。"}
+
+@app.post("/api/translate_subtitles")
+async def translate_subtitles(request: Request):
+    try:
+        sentences = subtitle_translation.sentences_from(await request.json())
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="字幕请求无效，请分批提交非空字幕。")
+    provider = provider_settings()["translation_provider"]
+    if provider == "gemini" and not gemini_client:
+        return {"status": "error", "message": "翻译服务未配置，请检查设置。"}
+    if provider == "qwen" and not aliyun.api_keys():
+        return {"status": "error", "message": "翻译服务未配置，请检查设置。"}
+    try:
+        prompt = subtitle_translation.prompt_for(sentences)
+        if provider == "qwen":
+            text = await asyncio.to_thread(qwen_completion, prompt, True)
+        else:
+            response = await asyncio.wait_for(gemini_client.aio.models.generate_content(
+                model=os.environ.get("GEMINI_MODEL", "gemini-3.5-flash"),
+                contents=prompt, config={"response_mime_type": "application/json"},
+            ), timeout=150)
+            text = response.text or ""
+        translated = subtitle_translation.translations_from(text, sentences)
+        return {"status": "success", "provider": provider, "translations": translated}
+    except ValueError as error:
+        return {"status": "error", "message": str(error)}
+    except Exception:
+        return {"status": "error", "message": "字幕翻译失败，请检查网络和翻译模型设置后点击双语字幕重试。"}
+
+
+def qwen_completion(prompt, json_output=True):
+    payload = {"model": "qwen-flash", "enable_thinking": False,
+               "messages": [{"role": "user", "content": prompt}]}
+    if json_output:
+        payload["response_format"] = {"type": "json_object"}
+    with requests.Session() as session:
+        session.trust_env = False
+        response = session.post(aliyun.root() + "/compatible-mode/v1/chat/completions",
+            headers={"Authorization": "Bearer " + aliyun.api_keys()[0]},
+            json=payload, timeout=(15, 120))
+        response.raise_for_status()
+        return response.json()["choices"][0]["message"]["content"]
+
 
 @app.get("/api/top-charts")
 def get_top_charts(country: str = "us", limit: int = 30):

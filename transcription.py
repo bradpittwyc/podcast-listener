@@ -166,7 +166,7 @@ def _transcript_events(audio_url, transcript_url, force_refresh, cache_dir, prox
                 return
 
         if not aliyun.api_keys():
-            raise TranscriptionError("请在设置中填写阿里云百炼 API Key。", retryable=False)
+            raise TranscriptionError("字幕服务未配置，请检查设置", retryable=False)
         if not shutil.which("ffmpeg"):
             raise TranscriptionError("找不到 FFmpeg；请安装并加入 PATH 后重启服务。", retryable=False)
         yield from aliyun.transcript_events(audio_url, audio_path, vtt_path, checkpoint_path, proxies, stopped)
