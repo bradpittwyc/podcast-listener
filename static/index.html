@@ -1162,6 +1162,7 @@ body.android-runtime .android-only{display:inline-flex!important}
     body.ai-expanded{grid-template-rows:44px minmax(0,1fr)}
     body.ai-expanded .col-mid{display:none}
     body.ai-expanded .col-right{grid-row:2}
+    body.ai-expanded .ai-messages::after{content:'';display:block;flex-shrink:0;height:var(--ai-reading-space,0px)}
     .ai-section{touch-action:manipulation}
     .ai-messages{min-height:0;overscroll-behavior:contain}
     .ai-messages > *{flex-shrink:0}
@@ -1431,8 +1432,24 @@ let aiBlankPointer = null;
 let aiLastBlankTap = null;
 let aiLastTouchToggle = -Infinity;
 function isAiBlank(event) {
-    return window.matchMedia('(max-width:600px)').matches
-        && event.target.matches('.col-right,.ai-section,.ai-hd,.ai-hd-actions,.ai-messages,.msg-row,.ai-input-panel,.ai-input-row,.ai-quick-tags');
+    if (!window.matchMedia('(max-width:600px)').matches || !event.target.closest('#colRight')) return false;
+    if (event.target.closest('button,a,input,textarea,select,[role="button"],[contenteditable]:not([contenteditable="false"])')) return false;
+    const containsPoint = rect => event.clientX >= rect.left && event.clientX < rect.right
+        && event.clientY >= rect.top && event.clientY < rect.bottom;
+    // A reply bubble includes padding, blank lines and space after each line.
+    // Only actual words block the gesture, regardless of their markup wrapper.
+    const walker = document.createTreeWalker(event.target, NodeFilter.SHOW_TEXT);
+    const range = document.createRange();
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        range.selectNodeContents(node);
+        if (!Array.from(range.getClientRects()).some(containsPoint)) continue;
+        for (const word of node.textContent.matchAll(/\S+/g)) {
+            range.setStart(node, word.index);
+            range.setEnd(node, word.index + word[0].length);
+            if (Array.from(range.getClientRects()).some(containsPoint)) return false;
+        }
+    }
+    return true;
 }
 function toggleAiOnBlank(event) {
     // Touch already toggles on pointerup; ignore its synthesized double click.
@@ -1478,7 +1495,18 @@ function toggleAiExpanded() {
     button.setAttribute('aria-label', label);
     button.title = label;
     document.querySelector('.ai-badge').textContent = expanded ? '（双击空白收起）' : '（双击空白展开阅读）';
-    messages.scrollTop = scrollTop;
+    messages.style.removeProperty('--ai-reading-space');
+    const replies = messages.querySelectorAll('.msg-row.ai .msg-bubble:not(.msg-loading)');
+    const latest = replies[replies.length - 1];
+    if (expanded && latest) {
+        const top = messages.scrollTop + latest.getBoundingClientRect().top - messages.getBoundingClientRect().top;
+        const padding = parseFloat(getComputedStyle(messages).paddingTop) || 0;
+        // Give short replies enough room below them to align their first line at the top.
+        messages.style.setProperty('--ai-reading-space', Math.max(0,top-padding+messages.clientHeight-messages.scrollHeight) + 'px');
+        messages.scrollTop = Math.max(0,top-padding);
+    } else {
+        messages.scrollTop = scrollTop;
+    }
 }
 let country = 'us';
 let currentFeed = null;
