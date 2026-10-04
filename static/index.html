@@ -1730,23 +1730,14 @@ function saveAndroidPlaybackState() {
 }
 function restoreAndroidPlaybackState() {
     if (nowPlaying) return;
-    try {
-        const state = JSON.parse(localStorage.getItem('android_playback_state') || 'null');
-        if (!state || !state.episode || !/^https?:\/\//.test(state.episode.url)) return;
-        const ep = state.episode;
-        startPlay(ep.url,ep.title || '',ep.author || '',ep.cover || '',ep.transcriptUrl || '',ep.description || '');
-        wantsPlayback = state.playing === true;
-        speed = Number.isFinite(state.speed) ? Math.max(.25,Math.min(1,state.speed)) : 1;
-        lastVolume = Number.isFinite(state.volume) ? Math.max(0,Math.min(1,state.volume)) : 1;
-        audio.volume = lastVolume; setSpeed(speed);
-        androidRestorePosition = Number.isFinite(state.position) ? Math.max(0,state.position) : 0;
-        audio.currentTime = androidRestorePosition;
-        saveAndroidPlaybackState();
-    } catch (_) {}
+    // A cold start always opens on the home screen. Keep state saving for
+    // foreground recovery, but never reopen or autoplay the last episode
+    // after the WebView/process has been destroyed.
+    try { localStorage.removeItem('android_playback_state'); } catch (_) {}
 }
 
 function resumeAndroidPlayback() {
-    if (!nowPlaying) { restoreAndroidPlaybackState(); return; }
+    if (!nowPlaying) return;
     ensureAndroidAudioSource();
     // Re-open SSE from its durable checkpoint after background WebView suspension.
     if (!subtitlesComplete) triggerAiTranscribe(true,true);

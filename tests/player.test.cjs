@@ -30,7 +30,7 @@ function player(storage = new Map()) {
         fetch: async (...args) => { fetchCalls.push(args); return {json: async () => args[0] === '/api/retranscribe_sentence'
             ? {status:'success',cue:{start:.2,end:19.8,text:'Corrected sentence.',source_start:0,source_end:20}}
             : {status:'success', answer:'Answer'}}; },
-        localStorage: {getItem(key) { return storage.get(key) ?? null; },setItem(key,value) {storage.set(key,value);}}});
+        localStorage: {getItem(key) { return storage.get(key) ?? null; },setItem(key,value) {storage.set(key,value);},removeItem(key) {storage.delete(key);}}});
     const html = fs.readFileSync(path.join(__dirname, '../static/index.html'), 'utf8');
     vm.runInContext(html.match(/<script>([\s\S]*?)<\/script>/)[1], context);
     vm.runInContext('toast = () => {}', context);
@@ -315,15 +315,14 @@ test('late sentence retry cannot modify a newly selected episode', async () => {
     assert.equal(p.run('cues.length'),0);
 });
 
-test('Android recreation restores episode, position and manual pause from persistent state', () => {
+test('Android cold start clears persistent playback state and stays on home screen', () => {
     const storage=new Map();const previous=player(storage);previous.run('window.androidNativeRuntime=true');previous.start();
     previous.streams[0].emit(cue(0,20));previous.streams[0].emit({status:'chunk_ready',until:30});
     previous.audio.currentTime=17;previous.run('togglePlay();saveAndroidPlaybackState()');
     const restored=player(storage);restored.run('window.androidNativeRuntime=true;restoreAndroidPlaybackState()');
-    assert.equal(restored.run('nowPlaying.url'),'https://example.com/one.mp3');
-    assert.equal(restored.audio.currentTime,17);assert.equal(restored.run('wantsPlayback'),false);
-    restored.streams[0].emit({status:'resumed',until:30,cues:[{start:0,end:20,text:'Hello world'}]});
-    assert.equal(restored.audio.paused,true);
+    assert.equal(restored.run('nowPlaying'),null);
+    assert.equal(restored.audio.currentTime,0);assert.equal(restored.run('wantsPlayback'),false);
+    assert.equal(storage.has('android_playback_state'),false);
 });
 
 test('quick questions and selected-example-only questions work while transcription continues', async () => {
@@ -355,16 +354,13 @@ test('an in-flight question keeps its subtitle snapshot and prevents duplicate r
     assert.equal(p.run('cues.length'),2);
 });
 
-test('Android restores through the audio proxy before resumed subtitles start playback', () => {
+test('Android cold start does not restore through the audio proxy', () => {
     const storage=new Map([['android_playback_state',JSON.stringify({episode:{url:'https://example.com/one.mp3'},position:17,playing:true,volume:1,speed:1})]]);
     const p=player(storage);p.run('window.androidNativeRuntime=true;restoreAndroidPlaybackState()');
-    assert.equal(p.audio.src,'/api/audio?url=https%3A%2F%2Fexample.com%2Fone.mp3');
+    assert.equal(p.audio.src,undefined);
     assert.equal(p.audio.playCount,0);
-    p.streams[0].emit({status:'audio_source',audio_url:p.audio.src});
-    p.streams[0].emit({status:'resumed',until:30,cues:[{start:0,end:20,text:'Hello world'}]});
-    assert.equal(p.audio.currentTime,17);
-    assert.equal(p.audio.paused,false);
-    assert.equal(p.audio.playCount,1);
+    assert.equal(p.streams.length,0);
+    assert.equal(storage.has('android_playback_state'),false);
 });
 
 test('Android official and cached subtitles play through the proxy without a later source event', () => {
@@ -424,7 +420,7 @@ test('Android starts with the native proxy before subtitle events, including off
 });
 
 
-test('Android restored playback keeps its proxy and position when resumed arrives before audio_source', () => {
+test('Android cold start clears saved proxy position before loading a new episode', () => {
     const storage = new Map([['android_playback_state', JSON.stringify({
         episode:{url:'https://example.com/one.mp3'},position:17,playing:true,speed:.75,volume:.6
     })]]);
@@ -433,17 +429,10 @@ test('Android restored playback keeps its proxy and position when resumed arrive
     // Browser media resets when its source is assigned, even if it is the same URL.
     Object.defineProperty(p.audio, 'src', {get(){return source;},set(value){source=value;assignments++;this.currentTime=0;this.paused=true;}});
     p.run('window.androidNativeRuntime=true;restoreAndroidPlaybackState()');
-    assert.equal(source, '/api/audio?url=https%3A%2F%2Fexample.com%2Fone.mp3');
-    const stream = p.streams[0];
-    stream.emit({status:'resumed',until:30,cues:[{start:0,end:20,text:'Hello world'}]});
-    assert.equal(p.audio.currentTime,17);
-    assert.equal(p.audio.paused,false);
-    stream.emit({status:'audio_source',audio_url:source});
-    stream.emit({status:'audio_ready',local_audio:'/cache/audio.mp3'});
-    assert.equal(assignments,1);
-    assert.equal(p.audio.currentTime,17);
-    assert.equal(p.audio.paused,false);
-    assert.equal(p.audio.playbackRate,.75);
+    assert.equal(source, undefined);
+    assert.equal(p.streams.length,0);
+    assert.equal(assignments,0);
+    assert.equal(storage.has('android_playback_state'),false);
 });
 
 
