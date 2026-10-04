@@ -698,14 +698,13 @@ body{display:flex;background:var(--bg);color:var(--text);width:100vw;height:100v
 .save-btn:hover { background: rgba(245,158,11,.12); border-color: rgba(245,158,11,.35); color: var(--amber); }
 .save-btn.saved { color: var(--amber); border-color: rgba(245,158,11,.35); background: rgba(245,158,11,.09); }
 .cue-actions{display:flex;align-items:center;gap:6px;flex-shrink:0}
-.save-btn.sentence-save-btn{opacity:1;width:86px;height:36px;margin-top:0;gap:6px;padding:0 8px;font-size:12px;font-weight:600;color:var(--purple-light);border-color:rgba(168,85,247,.5);background:rgba(168,85,247,.16);border-radius:8px}
-.save-btn.sentence-save-btn:hover{background:rgba(168,85,247,.27);border-color:var(--purple)}
-.save-btn.sentence-save-btn.saved{color:var(--amber);border-color:rgba(245,158,11,.65);background:rgba(245,158,11,.2)}
-@media(max-width:1180px){.save-btn.sentence-save-btn{height:44px}}
+.save-btn.sentence-save-btn{opacity:1;width:36px;height:36px;margin-top:0;padding:0;font-size:17px;color:var(--purple-light);border:0;background:transparent;border-radius:0}
+.save-btn.sentence-save-btn:hover{color:#e9d5ff;background:transparent;border:0}
+.save-btn.sentence-save-btn.saved{color:var(--amber);background:transparent;border:0}
+@media(max-width:1180px){.save-btn.sentence-save-btn{width:44px;height:44px}}
 @media(max-width:600px){
     .sub-line{display:grid;grid-template-columns:16px 40px minmax(0,1fr)}
     .sub-line .cue-actions{grid-column:3;justify-self:end}
-    .save-btn.sentence-save-btn{width:94px;font-size:13px}
 }
 
 /* Welcome Screen */
@@ -2391,7 +2390,7 @@ function renderSubs() {
             </button>
             <button class="save-btn sentence-save-btn ${saved ? 'saved' : ''}" id="sbtn-${i}"
                 onclick="saveSentence(event,${i})" title="${saved ? '已收藏，点击取消收藏' : '收藏到笔记本'}" aria-label="${saved ? '取消收藏这句字幕' : '收藏这句字幕'}" aria-pressed="${saved}">
-                <i class="fa-${saved ? 'solid' : 'regular'} fa-bookmark" aria-hidden="true"></i><span>${saved ? '已收藏' : '收藏'}</span>
+                <i class="fa-solid fa-bookmark" aria-hidden="true"></i>
             </button></div>
         </div>`;
     });
@@ -2899,7 +2898,7 @@ function updateSaveBtn(idx, saved) {
     const btn = document.getElementById(`sbtn-${idx}`);
     if (!btn) return;
     btn.className = `save-btn sentence-save-btn ${saved ? 'saved' : ''}`;
-    btn.innerHTML = `<i class="fa-${saved ? 'solid' : 'regular'} fa-bookmark" aria-hidden="true"></i><span>${saved ? '已收藏' : '收藏'}</span>`;
+    btn.innerHTML = `<i class="fa-solid fa-bookmark" aria-hidden="true"></i>`;
     btn.title = saved ? '已收藏，点击取消收藏' : '收藏到笔记本';
     btn.setAttribute?.('aria-pressed',String(saved));
     btn.setAttribute?.('aria-label',saved ? '取消收藏这句字幕' : '收藏这句字幕');

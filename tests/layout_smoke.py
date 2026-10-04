@@ -43,13 +43,18 @@ def main():
                 save = page.locator('#sbtn-0')
                 assert save.is_visible() and save.evaluate("el => getComputedStyle(el).opacity") == '1'
                 assert save.bounding_box()['height'] >= 36
-                assert save.inner_text().strip() == '收藏'
+                assert save.inner_text().strip() == ''
+                assert save.locator('.fa-bookmark').count() == 1
+                assert save.evaluate("el => getComputedStyle(el).backgroundColor") == 'rgba(0, 0, 0, 0)'
+                assert save.evaluate("el => getComputedStyle(el).borderTopWidth") == '0px'
+                unsaved_color = save.evaluate("el => getComputedStyle(el).color")
                 save.click()
                 assert save.get_attribute('aria-pressed') == 'true'
-                assert save.inner_text().strip() == '已收藏'
+                assert save.inner_text().strip() == ''
+                page.wait_for_function("color => getComputedStyle(document.getElementById('sbtn-0')).color !== color", arg=unsaved_color)
                 save.click()
                 assert save.get_attribute('aria-pressed') == 'false'
-                assert save.inner_text().strip() == '收藏'
+                assert save.inner_text().strip() == ''
                 assert page.evaluate("document.getElementById('subScroll').scrollWidth <= document.getElementById('subScroll').clientWidth")
                 assert page.locator('#subtitleTranslateBtn').is_enabled()
                 page.locator('#subtitleTranslateBtn').click()
