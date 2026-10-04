@@ -268,21 +268,25 @@ test('permanent configuration errors do not auto-retry', () => {
     assert.equal(p.timers.filter(t => !t.cleared).length, 0);
 });
 
-test('chat is blocked before complete subtitles, then sends the whole transcript', async () => {
+test('chat enables on the first cue and sends all current corrected subtitles, question and selected examples', async () => {
     const p = player(); p.start();
     await p.run('sendAiQuestion()');
     assert.equal(p.fetchCalls.length, 0);
     const stream = p.streams[0];
-    stream.emit(cue(0,20)); stream.emit({status:'chunk_ready',until:30});
-    await p.run('sendAiQuestion()');
-    assert.equal(p.fetchCalls.length, 0);
-    stream.emit({status:'done'});
+    stream.emit(cue(0,20));
     assert.equal(p.elements.get('aiSendBtn').disabled, false);
-    p.run("document.getElementById('aiInput').value = 'Summarize'");
+    assert.equal(p.elements.get('subtitleShareBtn').disabled, true);
+    stream.emit({status:'cue',cue:{start:20,end:40,text:'Second example.'}});
+    p.run("cues[0].text='Corrected first sentence.';selectedCues.add(1);document.getElementById('aiInput').value='Explain the selected example'");
     await p.run('sendAiQuestion()');
     const body = JSON.parse(p.fetchCalls[0][1].body);
-    assert.equal(body.transcript_complete, true);
-    assert.equal(body.full_transcript, 'Hello world');
+    assert.equal(body.transcript_complete, false);
+    assert.equal(body.full_transcript, 'Corrected first sentence. Second example.');
+    assert.equal(body.question, 'Explain the selected example');
+    assert.match(body.selected_text,/Second example\./);
+    assert.equal(body.audio_url,'https://example.com/one.mp3');
+    stream.emit({status:'chunk_ready',until:40});stream.emit({status:'done'});
+    assert.equal(p.elements.get('subtitleShareBtn').disabled,false);
     p.start('https://example.com/next.mp3');
     assert.equal(p.elements.get('aiSendBtn').disabled, true);
 });
@@ -320,6 +324,67 @@ test('Android recreation restores episode, position and manual pause from persis
     assert.equal(restored.audio.currentTime,17);assert.equal(restored.run('wantsPlayback'),false);
     restored.streams[0].emit({status:'resumed',until:30,cues:[{start:0,end:20,text:'Hello world'}]});
     assert.equal(restored.audio.paused,true);
+});
+
+test('quick questions and selected-example-only questions work while transcription continues', async () => {
+    const p=player();p.start();p.streams[0].emit(cue(0,20));
+    p.run("quickAsk('语法拆解')");
+    const quick=JSON.parse(p.fetchCalls[0][1].body);
+    assert.equal(quick.transcript_complete,false);
+    assert.equal(quick.full_transcript,'Hello world');
+    assert.ok(quick.question.length>0);
+    await new Promise(resolve=>setImmediate(resolve));
+    p.run("selectedCues.add(0);document.getElementById('aiInput').value=''");
+    await p.run('sendAiQuestion()');
+    const selected=JSON.parse(p.fetchCalls[1][1].body);
+    assert.equal(selected.question,'');
+    assert.match(selected.selected_text,/Hello world/);
+});
+
+test('an in-flight question keeps its subtitle snapshot and prevents duplicate requests', async () => {
+    const p=player();p.start();p.streams[0].emit(cue(0,20));
+    p.run("document.getElementById('aiInput').value='Explain';fetch=(url,options)=>{globalThis.askSnapshot=JSON.parse(options.body);return new Promise(resolve=>globalThis.finishAsk=resolve)}");
+    const pending=p.run('sendAiQuestion()');
+    assert.equal(p.elements.get('aiSendBtn').disabled,true);
+    p.streams[0].emit({status:'cue',cue:{start:20,end:40,text:'Arrived later.'}});
+    await p.run('sendAiQuestion()');
+    assert.equal(p.run('askSnapshot.full_transcript'),'Hello world');
+    p.run("finishAsk({json:async()=>({status:'success',answer:'Answer'})})");
+    await pending;
+    assert.equal(p.elements.get('aiSendBtn').disabled,false);
+    assert.equal(p.run('cues.length'),2);
+});
+
+test('Android restores through the audio proxy before resumed subtitles start playback', () => {
+    const storage=new Map([['android_playback_state',JSON.stringify({episode:{url:'https://example.com/one.mp3'},position:17,playing:true,volume:1,speed:1})]]);
+    const p=player(storage);p.run('window.androidNativeRuntime=true;restoreAndroidPlaybackState()');
+    assert.equal(p.audio.src,'/api/audio?url=https%3A%2F%2Fexample.com%2Fone.mp3');
+    assert.equal(p.audio.playCount,0);
+    p.streams[0].emit({status:'audio_source',audio_url:p.audio.src});
+    p.streams[0].emit({status:'resumed',until:30,cues:[{start:0,end:20,text:'Hello world'}]});
+    assert.equal(p.audio.currentTime,17);
+    assert.equal(p.audio.paused,false);
+    assert.equal(p.audio.playCount,1);
+});
+
+test('Android official and cached subtitles play through the proxy without a later source event', () => {
+    for(const status of ['official','cached']) {
+        const p=player();p.run('window.PodcastAndroid={}');p.start();
+        const source='/api/audio?url=https%3A%2F%2Fexample.com%2Fone.mp3';
+        assert.equal(p.audio.src,source);
+        p.streams[0].emit({status,vtt:'WEBVTT\n\n00:00:00.000 --> 00:00:20.000\nHello world\n'});
+        assert.equal(p.audio.src,source);
+        assert.equal(p.audio.paused,false);
+    }
+});
+
+test('an unchanged audio source does not reset a pending automatic play', () => {
+    const p=player();p.run('window.androidNativeRuntime=true');p.start();
+    let resets=0;const source=p.audio.src;
+    p.audio.getAttribute=()=>source;
+    Object.defineProperty(p.audio,'src',{get:()=>source,set:()=>resets++});
+    p.streams[0].emit({status:'audio_source',audio_url:source});
+    assert.equal(resets,0);
 });
 
 test('Android foreground recovery resumes SSE without clearing cues or playback position', () => {

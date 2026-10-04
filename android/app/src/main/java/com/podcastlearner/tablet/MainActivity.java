@@ -1,6 +1,7 @@
 package com.podcastlearner.tablet;
 
 import android.app.Activity;
+import android.content.pm.ActivityInfo;
 import android.os.Bundle;
 import android.view.View;
 import android.webkit.WebResourceRequest;
@@ -35,6 +36,9 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved);
+        if (getResources().getConfiguration().smallestScreenWidthDp < 600) {
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+        }
         getWindow().setStatusBarColor(0xff0d0d18);
         getWindow().setNavigationBarColor(0xff0d0d18);
         layout = new FrameLayout(this);
@@ -157,7 +161,11 @@ public class MainActivity extends Activity {
     }
     private void showError(String text) {splash.animate().cancel();splash.setAlpha(1);splash.setVisibility(View.VISIBLE);loading.setVisibility(View.GONE);status.setVisibility(View.VISIBLE);status.setText(text);retry.setVisibility(View.VISIBLE);}
     @Override public void onBackPressed() {
-        web.evaluateJavascript("(function(){var d=document.getElementById('settingsDialog');if(d&&d.open){closeSettings();return;}if(document.getElementById('colLeft').classList.contains('collapsed')){expandSidebar();}})()",null);
+        web.evaluateJavascript("(function(){var d=document.getElementById('settingsDialog');if(d&&d.open){closeSettings();return true;}if(document.getElementById('colLeft').classList.contains('collapsed')||document.getElementById('tab-plaza').style.display==='none'){showTab('plaza');expandSidebar();return true;}return false;})()",handled -> {
+            if (!destroyed && "false".equals(handled) && getResources().getConfiguration().smallestScreenWidthDp < 600) {
+                moveTaskToBack(true);
+            }
+        });
     }
     @Override protected void onDestroy() { destroyed=true; web.destroy(); super.onDestroy(); }
 }

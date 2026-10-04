@@ -71,6 +71,12 @@ public final class NativeBackend implements AutoCloseable {
         JSONObject result=new JSONObject(); for(int i=0;i<pairs.length;i+=2) result.put((String)pairs[i],pairs[i+1]); return result;
     }
     static String encode(String value) throws Exception { return URLEncoder.encode(value,"UTF-8"); }
+    static String studyPrompt(String transcript,String question,String selected,boolean complete) {
+        String query=question.trim().isEmpty()?"请详细解析勾选字幕句子的语法结构、生词习语和地道用法。":question;
+        return "你是专业、耐心的英语播客学习助教。请结合当前已获得的全部字幕和选中例句，以中文清晰、详实地解答用户的问题，可使用 Markdown。"
+            + (complete?"本期字幕已全部转写完成。":"本期字幕仍在转写，以下仅为当前已获得的全部内容；回答应基于这些内容，不要推测尚未获得的部分。")
+            + "\n【当前已获得的全部字幕】\n"+transcript+"\n【用户勾选的例句】\n"+selected+"\n【用户的问题】\n"+query;
+    }
     static byte[] bytes(String text) { return text.getBytes(StandardCharsets.UTF_8); }
     static byte[] read(InputStream input, int maximum) throws IOException {
         try(InputStream source=input; ByteArrayOutputStream result=new ByteArrayOutputStream()) {
@@ -175,8 +181,9 @@ public final class NativeBackend implements AutoCloseable {
         }
         if(r.path.equals("/api/retranscribe_sentence") && r.method.equals("POST")) { regenerate(r,output);return; }
         if(r.path.equals("/api/ask")) {
-            if(!r.body.optBoolean("transcript_complete") || r.body.optString("full_transcript").trim().isEmpty()) { response(output,409,"application/json",bytes(object("detail","请等待全篇字幕加载完成").toString()));return; }
-            String prompt="你是英语播客学习助教。以下是本期完整字幕，请结合全文推理、解释背景，以中文回答。\n【完整字幕】\n"+r.body.getString("full_transcript")+"\n【选中字幕】\n"+r.body.optString("selected_text")+"\n【问题】\n"+r.body.optString("question");
+            if(r.body.optString("full_transcript").trim().isEmpty()) { response(output,409,"application/json",bytes(object("detail","请等待首条字幕加载后提问").toString()));return; }
+            if(r.body.optString("question").trim().isEmpty() && r.body.optString("selected_text").trim().isEmpty()) { response(output,400,"application/json",bytes(object("detail","请输入问题或勾选字幕例句").toString()));return; }
+            String prompt=studyPrompt(r.body.getString("full_transcript"),r.body.optString("question"),r.body.optString("selected_text"),r.body.optBoolean("transcript_complete"));
             json(output,object("status","success","answer",gemini(prompt,false)));return;
         }
         if(r.path.equals("/api/define")) {
@@ -476,6 +483,7 @@ public final class NativeBackend implements AutoCloseable {
         try {
             while(!(acquired=lock.tryAcquire(1,TimeUnit.SECONDS)))if(events.stopped.get()||closed)return;
             if(events.stopped.get()||closed)return;
+            events.send(object("status","audio_source","audio_url","/api/audio?url="+encode(url)));
             AtomicFile file=checkpoint(url);if(request.q("force_refresh").equals("true")){file.delete();events.correctionsFile.delete();}JSONObject state=load(file);
             JSONArray cues=state.optJSONArray("cues");if(cues==null)cues=new JSONArray();
             if(state.optBoolean("complete")){events.send(object("status","cached","vtt",vtt(correctCues(cues,load(events.correctionsFile).optJSONArray("cues")))));return;}
@@ -491,7 +499,6 @@ public final class NativeBackend implements AutoCloseable {
             JSONObject fragment=state.optJSONObject("pending_sentence");
             double coverage=fragment==null?until:(cues.length()==0?0:cues.getJSONObject(cues.length()-1).getDouble("end"));
             events.send(object("status","resumed","until",coverage,"cues",cues));
-            events.send(object("status","audio_source","audio_url","/api/audio?url="+encode(url)));
             events.send(object("status","progress","detail","设备正在流式下载并解码，首段字幕就绪后播放。"));
             decode(url,until,index,cues,fragment,keys,file,events);
         } catch(Exception error) {

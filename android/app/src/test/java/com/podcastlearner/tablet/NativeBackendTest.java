@@ -6,6 +6,20 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class NativeBackendTest {
+    @Test public void studyPromptIncludesAllPartialSubtitlesQuestionAndExamples() {
+        String transcript=new String(new char[30000]).replace('\0','x')+" END_OF_CURRENT_SUBTITLES";
+        String prompt=NativeBackend.studyPrompt(transcript,"Explain this expression.","[00:05] Selected example.",false);
+        assertTrue(prompt.contains(transcript));
+        assertTrue(prompt.contains("Explain this expression."));
+        assertTrue(prompt.contains("[00:05] Selected example."));
+        assertTrue(prompt.contains("仍在转写"));
+    }
+    @Test public void studyPromptDefaultsToExplainingSelectedExamplesWithoutQuestion() {
+        String prompt=NativeBackend.studyPrompt("Available subtitles.","","Selected example.",true);
+        assertTrue(prompt.contains("Selected example."));
+        assertTrue(prompt.contains("请详细解析勾选字幕句子"));
+        assertTrue(prompt.contains("已全部转写完成"));
+    }
     @Test public void automaticDictionaryTracksProxyChanges() {
         assertEquals("qwen",NativeBackend.chooseDictionaryProvider("auto",false));
         assertEquals("gemini",NativeBackend.chooseDictionaryProvider("auto",true));
