@@ -1455,7 +1455,7 @@ body.android-runtime .android-only{display:inline-flex!important}
 
         <!-- Chat messages area -->
         <div class="ai-messages" id="aiMessages">
-            <div class="ai-welcome-card" id="aiWelcomeCard">
+            <div class="ai-welcome-card" id="aiWelcomeCard" data-ai-welcome="true">
                 <button class="welcome-close" onclick="dismissAiWelcome()" aria-label="关闭提示" title="关闭提示">×</button>
                 <h4><i class="fa-solid fa-lightbulb" style="color:var(--amber)"></i> 智能字幕助学</h4>
                 在左侧字幕列表勾选任意句子，它们会自动被送入下方的提问框。<br>
@@ -2748,8 +2748,8 @@ function removeChatLoading(id) {
 function clearAiChat() {
     const list = document.getElementById('aiMessages');
     if (list) {
-        list.innerHTML = `<div class="ai-welcome-card">
-                <button class="welcome-close" onclick="this.parentElement.remove()" aria-label="关闭提示" title="关闭提示">×</button>
+        list.innerHTML = aiWelcomeDismissedForProcess ? '' : `<div class="ai-welcome-card" data-ai-welcome="true">
+                <button class="welcome-close" onclick="dismissAiWelcome()" aria-label="关闭提示" title="关闭提示">×</button>
             <h4><i class="fa-solid fa-lightbulb" style="color:var(--amber)"></i> 对话已清空</h4>
             在中间勾选字幕即可将句子送入提问框，随时向 AI 学习提问。
         </div>`;
@@ -3234,19 +3234,11 @@ async function saveApiSettings(event) {
         document.getElementById('settingsStatus').textContent = '保存失败，请重试。';
     } finally { button.disabled = false; }
 }
+let aiWelcomeDismissedForProcess = false;
 function dismissAiWelcome() {
-    try { localStorage.setItem('ai_welcome_dismissed','1'); } catch (_) {}
-    const card = document.getElementById('aiWelcomeCard');
-    if (card) card.style.display = 'none';
+    aiWelcomeDismissedForProcess = true;
+    document.querySelectorAll('[data-ai-welcome="true"]').forEach(card => card.remove());
 }
-
-// Apply before the first page paint, including subsequent app launches.
-try {
-    if (localStorage.getItem('ai_welcome_dismissed') === '1') {
-        const card = document.getElementById('aiWelcomeCard');
-        if (card) card.style.display = 'none';
-    }
-} catch (_) {}
 
 window.onload = () => {
     initAiExpansion();

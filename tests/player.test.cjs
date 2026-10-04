@@ -390,10 +390,10 @@ test('Android foreground recovery resumes SSE without clearing cues or playback 
     assert.equal(p.run('cues.length'),1);assert.equal(p.audio.currentTime,12);assert.equal(p.audio.paused,true);
 });
 
-test('dismissed tutor welcome stays hidden after reopening', () => {
-    const storage=new Map();const first=player(storage);first.run('dismissAiWelcome()');
-    assert.equal(storage.get('ai_welcome_dismissed'),'1');
-    const second=player(storage);assert.equal(second.elements.get('aiWelcomeCard').style.display,'none');
+test('dismissed tutor welcome stays hidden for this process and returns on next launch', () => {
+    const first=player();first.run('dismissAiWelcome()');
+    assert.equal(first.run('aiWelcomeDismissedForProcess'),true);
+    const second=player();assert.equal(second.run('aiWelcomeDismissedForProcess'),false);
 });
 
 test('catalog failures show the server error instead of treating it as podcast data', async () => {
