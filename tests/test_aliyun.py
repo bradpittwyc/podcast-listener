@@ -150,6 +150,11 @@ class AliyunTests(unittest.TestCase):
         error = aliyun.task_error({'error_code': 'InvalidApiKey', 'error_message': 'secret-key'})
         self.assertFalse(error.retryable)
         self.assertNotIn('secret-key', str(error))
+
+    def test_exhausted_free_tier_quota_is_permanent(self):
+        error = aliyun.task_error({'error_code': 'AllocationQuota.FreeTierOnly'})
+        self.assertFalse(error.retryable)
+        self.assertIn('额度', str(error))
         self.assertTrue(aliyun.task_error({'error_code': 'Throttling'}).retryable)
 
     def test_duration_is_available_before_immediate_server_response(self):

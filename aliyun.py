@@ -89,8 +89,8 @@ class ASRError(RuntimeError):
 
 def task_error(header):
     code = str(header.get('error_code', '')).lower()
-    permanent = any(word in code for word in ('auth', 'apikey', 'api_key', 'invalidparameter', 'accessdenied', 'modelnotfound', 'arrearage'))
-    return ASRError('阿里云转写失败，请检查密钥、模型权限或额度。' if permanent else
+    permanent = any(word in code for word in ('auth', 'apikey', 'api_key', 'invalidparameter', 'accessdenied', 'modelnotfound', 'arrearage', 'quota', 'freetieronly'))
+    return ASRError('阿里云转写额度或模型权限不可用，请检查阿里云模型额度设置。' if permanent else
                     '阿里云转写暂时失败，正在从断点重连。', retryable=not permanent)
 
 

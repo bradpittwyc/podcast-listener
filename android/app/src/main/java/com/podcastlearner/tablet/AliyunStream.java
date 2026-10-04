@@ -41,8 +41,8 @@ final class AliyunStream implements AutoCloseable {
     }
     static Failure taskError(JSONObject header) {
         String code = header.optString("error_code").toLowerCase(java.util.Locale.ROOT);
-        boolean permanent = code.matches(".*(auth|apikey|api_key|invalidparameter|accessdenied|modelnotfound|arrearage).*");
-        return new Failure(permanent ? "阿里云转写失败，请检查密钥、模型权限或额度。" : "阿里云暂时失败，正在从断点重连。", !permanent);
+        boolean permanent = code.matches(".*(auth|apikey|api_key|invalidparameter|accessdenied|modelnotfound|arrearage|quota|freetieronly).*");
+        return new Failure(permanent ? "阿里云转写额度或模型权限不可用，请检查阿里云模型额度设置。" : "阿里云暂时失败，正在从断点重连。", !permanent);
     }
     AliyunStream(String key, String region, double offset, int index) throws Exception {
         this(CLIENT,key,region,offset,index);
