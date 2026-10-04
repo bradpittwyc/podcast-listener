@@ -51,30 +51,37 @@ public class MainActivity extends Activity {
         LinearLayout brand=new LinearLayout(this);
         brand.setOrientation(LinearLayout.VERTICAL);brand.setGravity(Gravity.CENTER);
         ImageView icon=new ImageView(this);icon.setImageResource(R.drawable.ic_podcast);
-        GradientDrawable iconShape=new GradientDrawable();iconShape.setColor(0xff15101f);iconShape.setCornerRadius(dp(28));iconShape.setStroke(dp(1),0xff40234f);
+        GradientDrawable iconShape=new GradientDrawable();iconShape.setColor(0xff15101f);iconShape.setCornerRadius(dp(26));iconShape.setStroke(dp(1),0xff40234f);
         icon.setBackground(iconShape);icon.setClipToOutline(true);icon.setElevation(dp(12));
-        brand.addView(icon,new LinearLayout.LayoutParams(dp(112),dp(112)));
-        TextView motto=new TextView(this);motto.setText("Live in the");
-        motto.setTextColor(0xffe6dced);motto.setTextSize(25);motto.setTypeface(Typeface.create("sans-serif-light",Typeface.NORMAL));
-        motto.setLetterSpacing(.09f);motto.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams mottoParams=new LinearLayout.LayoutParams(-2,-2);mottoParams.topMargin=dp(28);
-        brand.addView(motto,mottoParams);
-        TextView language=new TextView(this){
+        brand.addView(icon,new LinearLayout.LayoutParams(dp(96),dp(96)));
+        TextView appName=new TextView(this){
             @Override protected void onSizeChanged(int w,int h,int oldw,int oldh){
                 super.onSizeChanged(w,h,oldw,oldh);
-                getPaint().setShader(new LinearGradient(0,0,w,h,new int[]{0xffe9d5ff,0xffc084fc,0xfff0abfc},null,Shader.TileMode.CLAMP));
+                getPaint().setShader(new LinearGradient(0,0,w,h,new int[]{0xffffffff,0xffe9d5ff,0xffc084fc},null,Shader.TileMode.CLAMP));
             }
         };
-        language.setText("Language");language.setTextColor(0xffffffff);language.setTextSize(getResources().getConfiguration().smallestScreenWidthDp>=600?52:44);
-        language.setTypeface(Typeface.create("serif",Typeface.ITALIC));language.setLetterSpacing(-.025f);
-        language.setGravity(Gravity.CENTER);language.setIncludeFontPadding(false);language.setPadding(dp(8),0,dp(8),dp(6));
-        language.setContentDescription("Language");
-        LinearLayout.LayoutParams languageParams=new LinearLayout.LayoutParams(-2,-2);languageParams.topMargin=dp(2);
-        brand.addView(language,languageParams);
-        View accent=new View(this);
-        accent.setBackground(new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,new int[]{0xffc084fc,0xfff0abfc}));
-        LinearLayout.LayoutParams accentParams=new LinearLayout.LayoutParams(dp(44),dp(1));accentParams.topMargin=dp(18);
-        brand.addView(accent,accentParams);
+        appName.setText("播客学伴");appName.setTextColor(0xffffffff);appName.setTextSize(30);
+        appName.setTypeface(Typeface.create("Microsoft YaHei",Typeface.BOLD));appName.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams appNameParams=new LinearLayout.LayoutParams(-2,-2);appNameParams.topMargin=dp(18);
+        brand.addView(appName,appNameParams);
+        TextView slogan=new TextView(this);
+        slogan.setText("Live   in the Language");slogan.setTextColor(0xffc084fc);slogan.setTextSize(15);
+        slogan.setTypeface(Typeface.create("Microsoft YaHei",Typeface.NORMAL));slogan.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams sloganParams=new LinearLayout.LayoutParams(-2,-2);sloganParams.topMargin=dp(10);
+        brand.addView(slogan,sloganParams);
+        slogan.post(()->{
+            int w=slogan.getWidth(), h=slogan.getHeight();
+            if(w>0 && h>0){
+                android.animation.ValueAnimator anim=android.animation.ValueAnimator.ofInt(0,w);
+                anim.setDuration(1200);
+                anim.setInterpolator(new android.view.animation.DecelerateInterpolator());
+                anim.addUpdateListener(a->{
+                    int cw=(int)a.getAnimatedValue();
+                    slogan.setClipBounds(new android.graphics.Rect(0,0,cw,h));
+                });
+                anim.start();
+            }
+        });
         loading=new ProgressBar(this,null,android.R.attr.progressBarStyleSmall);
         loading.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(0xffc084fc));
         LinearLayout.LayoutParams loadingParams=new LinearLayout.LayoutParams(dp(20),dp(20));loadingParams.topMargin=dp(32);
