@@ -47,14 +47,16 @@ def main():
                 assert save.locator('.fa-bookmark').count() == 1
                 assert save.evaluate("el => getComputedStyle(el).backgroundColor") == 'rgba(0, 0, 0, 0)'
                 assert save.evaluate("el => getComputedStyle(el).borderTopWidth") == '0px'
-                unsaved_color = save.evaluate("el => getComputedStyle(el).color")
+                assert save.locator('.fa-regular.fa-bookmark').count() == 1
                 save.click()
                 assert save.get_attribute('aria-pressed') == 'true'
                 assert save.inner_text().strip() == ''
-                page.wait_for_function("color => getComputedStyle(document.getElementById('sbtn-0')).color !== color", arg=unsaved_color)
+                assert save.locator('.fa-solid.fa-bookmark').count() == 1
+                assert save.evaluate("el => getComputedStyle(el).getPropertyValue('--purple-light').trim()")
                 save.click()
                 assert save.get_attribute('aria-pressed') == 'false'
                 assert save.inner_text().strip() == ''
+                assert save.locator('.fa-regular.fa-bookmark').count() == 1
                 assert page.evaluate("document.getElementById('subScroll').scrollWidth <= document.getElementById('subScroll').clientWidth")
                 assert page.locator('#subtitleTranslateBtn').is_enabled()
                 page.locator('#subtitleTranslateBtn').click()
