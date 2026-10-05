@@ -130,7 +130,7 @@ public final class NativeBackend implements AutoCloseable {
             response(output,200,"text/html; charset=utf-8",bytes(html)); return;
         }
         if(r.path.startsWith("/assets/") && !r.path.contains("..")) {
-            String name=r.path.substring(8); response(output,200,name.endsWith(".css")?"text/css":"font/woff2",read(context.getAssets().open(name),1024*1024)); return;
+            String name=r.path.substring(8); response(output,200,name.endsWith(".json")?"application/json; charset=utf-8":name.endsWith(".css")?"text/css":"font/woff2",read(context.getAssets().open(name),name.endsWith(".json")?8*1024*1024:1024*1024)); return;
         }
         if(r.path.equals("/api/runtime")) { json(output,object("backend","android","independent",true,"device",android.os.Build.MODEL)); return; }
         if(r.path.equals("/api/settings")) {

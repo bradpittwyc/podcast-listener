@@ -1107,6 +1107,12 @@ body.android-runtime .android-only{display:inline-flex!important}
 
 .spinner { width: 24px; height: 24px; border: 2px solid var(--border); border-top-color: var(--purple); border-radius: 50%; animation: spin .8s linear infinite; margin: 30px auto; }
 @keyframes spin{to{transform:rotate(360deg);}}
+
+.chart-category-select{margin:8px 10px;width:calc(100% - 20px);padding:9px;background:var(--panel-left-bg);color:var(--text);border:1px solid var(--border);border-radius:8px;font-size:12px}
+.chart-description{padding:12px;border-bottom:1px solid var(--border);font-size:12px;line-height:1.7;color:var(--text2)}
+.chart-description h4{color:var(--text);margin:6px 0}.chart-description p{white-space:pre-line;overflow-wrap:anywhere}
+.chart-source{padding:10px;font-size:10px;color:var(--text3);line-height:1.5}.chart-source a{color:var(--purple-light)}
+.pod-card[data-chart-slug]{cursor:pointer}.pod-card[data-chart-slug]:focus-visible{outline:2px solid var(--purple-light);outline-offset:2px}
 </style>
 <style>
 .settings-footer{flex-shrink:0;padding:10px;border-top:1px solid var(--border)}
@@ -1911,15 +1917,70 @@ function switchRegion(c) {
     loadTopCharts(c);
 }
 
+
+// US/UK final charts are bundled locally; playback keeps the existing learner pipeline.
+const plazaSnapshots = new Map();
+const plazaCategories = {us:'All Podcasts',gb:'All Podcasts'};
+let plazaLoadId = 0;
+const plazaCategoryLabels = {'All Podcasts':'全部播客',Arts:'艺术',Business:'商业',Comedy:'喜剧',Education:'教育',Fiction:'故事','Health & Fitness':'健康与健身',History:'历史','Kids & Family':'亲子与家庭',Leisure:'休闲',Music:'音乐',News:'新闻',Science:'科学','Society & Culture':'社会与文化',Sports:'体育',Technology:'科技','TV & Film':'影视'};
+async function loadBundledChart(region, loadId) {
+    let snapshot = plazaSnapshots.get(region);
+    if (!snapshot) {
+        const response = await fetch(`/assets/podcast-charts/${region}.json`);
+        if (!response.ok) throw new Error('本地榜单读取失败');
+        snapshot = await response.json();
+        if (!Array.isArray(snapshot.categories) || !snapshot.shows) throw new Error('榜单数据格式错误');
+        plazaSnapshots.set(region,snapshot);
+    }
+    if (loadId !== plazaLoadId || country !== region) return;
+    renderBundledChart(region);
+}
+function renderBundledChart(region) {
+    const snapshot = plazaSnapshots.get(region);
+    if (!snapshot) return;
+    const category = snapshot.categories.find(item => item.name === plazaCategories[region]) || snapshot.categories[0];
+    plazaCategories[region] = category.name;
+    let html = `<select class="chart-category-select" aria-label="播客分类" onchange="selectPlazaCategory(this.value)">${snapshot.categories.map(item => `<option value="${escHtml(item.name)}" ${item.name===category.name?'selected':''}>${escHtml(plazaCategoryLabels[item.name] || item.name)}</option>`).join('')}</select>`;
+    html += `<div class="sec-label">${region==='gb'?'英国':'美国'} · ${escHtml(plazaCategoryLabels[category.name] || category.name)} Top 30</div><div class="pod-grid">`;
+    category.shows.forEach((slug,index) => {
+        const show=snapshot.shows[slug];if(!show)return;
+        html += `<div class="pod-card" role="button" tabindex="0" data-chart-slug="${escHtml(slug)}" aria-label="${escHtml(show.title)}"><img src="${escHtml(show.thumbnail)}" onerror="recoverCover(this)" alt="" loading="lazy"><div class="pod-card-info"><div class="pod-card-title">${index+1}. ${escHtml(show.title)}</div><div class="pod-card-artist">${escHtml(show.author)}</div></div></div>`;
+    });
+    html += `</div><div class="chart-source">榜单快照 · ${escHtml(snapshot.capturedAt)} · <a href="${escHtml(snapshot.source)}" target="_blank" rel="noopener noreferrer">来源网页</a></div>`;
+    setPlaza(html);
+}
+function selectPlazaCategory(value) {
+    const snapshot=plazaSnapshots.get(country);
+    if(!snapshot?.categories.some(item=>item.name===value))return;
+    plazaLoadId++;plazaCategories[country]=value;renderBundledChart(country);
+}
+function openBundledShow(slug) {
+    const show=plazaSnapshots.get(country)?.shows[slug];if(!show)return;
+    plazaLoadId++;
+    currentMeta={collectionName:show.title,artistName:show.author,artworkUrl600:show.thumbnail};
+    const feed={title:show.title,author:show.author,image:show.thumbnail,chartSnapshot:true,descriptionEn:show.description_en,descriptionZh:show.description_zh,episodes:show.episodes.map(ep=>({title:ep.title,pubDate:ep.date,audioUrl:ep.audio,transcriptUrl:'',description:show.description_en}))};
+    renderChannel(feed,currentMeta);
+}
+document.addEventListener('click',event=>{
+    const card=event.target.closest?.('[data-chart-slug]');if(card)openBundledShow(card.dataset.chartSlug);
+});
+document.addEventListener('keydown',event=>{
+    const card=event.target.closest?.('[data-chart-slug]');
+    if(card && (event.key==='Enter'||event.key===' ')){event.preventDefault();openBundledShow(card.dataset.chartSlug);}
+});
+
 async function loadTopCharts(c = 'us') {
+    const loadId=++plazaLoadId;
     expandSidebar();
     setPlaza('<div class="spinner"></div>');
     try {
+        if(c==='us'||c==='gb'){await loadBundledChart(c,loadId);return;}
         const res = await fetch(`/api/top-charts?country=${c}&limit=30`);
         const data = await res.json();
         if (!res.ok || !Array.isArray(data.results)) throw new Error(data.detail || data.message || '播客榜单加载失败');
-        renderTopCharts(data.results);
+        if(loadId===plazaLoadId)renderTopCharts(data.results);
     } catch(e) {
+        if(loadId!==plazaLoadId)return;
         setPlaza(`<div style="padding:24px;text-align:center;color:var(--text3);font-size:12px">加载失败: ${escHtml(e.message)}</div>`);
     }
 }
@@ -1961,6 +2022,7 @@ document.addEventListener('click', event => {
 function handleKey(e) { if (e.key === 'Enter') doSearch(); }
 
 async function doSearch() {
+    plazaLoadId++;
     expandSidebar();
     const q = document.getElementById('searchInput').value.trim();
     if (!q) { loadTopCharts(country); return; }
@@ -2040,7 +2102,7 @@ function renderChannel(feed, meta = {}, page = 1) {
     if (currentFeed !== feed) {
         currentFeed = feed;
         // "正序" (oldest first) -> RSS is usually newest first, so we reverse it.
-        currentEpisodes = [...(feed.episodes || [])].reverse();
+        currentEpisodes = feed.chartSnapshot ? [...(feed.episodes || [])] : [...(feed.episodes || [])].reverse();
     }
     
     currentEpPage = page;
@@ -2065,7 +2127,7 @@ function renderChannel(feed, meta = {}, page = 1) {
                 <div class="chan-mini-author">${esc(author)} · 共 ${totalEps} 集</div>
             </div>
         </div>
-    </div><div class="ep-list">`;
+    </div>${feed.chartSnapshot ? `<div class="chart-description">${feed.descriptionZh ? `<h4>中文简介</h4><p>${escHtml(feed.descriptionZh)}</p>` : ''}${feed.descriptionEn ? `<h4>About this podcast</h4><p lang="en">${escHtml(feed.descriptionEn)}</p>` : ''}</div>` : ''}<div class="ep-list">`;
 
     if (!pageEps.length) {
         h += `<div style="padding:30px 14px;text-align:center;color:var(--text3);font-size:12px">此播客暂无可解析的单集音频</div>`;

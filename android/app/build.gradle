@@ -19,7 +19,7 @@ dependencies {
 }
 tasks.register('bundleWeb', Copy) {
     from '../../static'
-    include 'index.html'
+    include 'index.html', 'podcast-charts/*.json'
     into layout.buildDirectory.dir('generated/assets')
 }
 tasks.named('preBuild').configure { dependsOn 'bundleWeb' }

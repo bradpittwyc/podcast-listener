@@ -406,7 +406,7 @@ test('dismissed tutor welcome stays hidden for this process and returns on next 
 test('catalog failures show the server error instead of treating it as podcast data', async () => {
     const p=player();
     p.run("fetch=async()=>({ok:false,json:async()=>({message:'Secure connection failed'})})");
-    await p.run('loadTopCharts()');
+    await p.run("loadTopCharts('ca')");
     assert.match(p.elements.get('plazaContent').innerHTML,/Secure connection failed/);
     assert.doesNotMatch(p.elements.get('plazaContent').innerHTML,/forEach/);
     await p.run("loadPodcast('1200361736')");
@@ -626,4 +626,26 @@ test('tutor model is loaded and saved separately from translation', async () => 
     p.elements.get('tutorProvider').value='qwen';await p.run('saveApiSettings({preventDefault(){}})');
     const body=JSON.parse(p.fetchCalls[0][1].body);
     assert.equal(body.tutor_provider,'qwen');assert.equal(body.translation_provider,'qwen');
+});
+
+test('bundled charts preserve source episode order and escape descriptions', async () => {
+    const p=player();
+    p.run(`fetch=async()=>({ok:true,json:async()=>({capturedAt:'2026-10-05',source:'https://example.org/',categories:[{name:'All Podcasts',shows:['show']}],shows:{show:{title:'Show',author:'Author',thumbnail:'',description_en:'<img src=x onerror=attack()>',description_zh:'Chinese',episodes:[{title:'Newest',date:'2026-10-05',audio:'https://example.org/new.mp3'},{title:'Older',date:'2026-10-04',audio:'https://example.org/old.mp3'}]}}})})`);
+    await p.run('loadTopCharts()');
+    assert.match(p.elements.get('plazaContent').innerHTML,/data-chart-slug="show"/);
+    p.run("openBundledShow('show')");
+    assert.equal(p.run('currentEpisodes[0].title'),'Newest');
+    assert.match(p.elements.get('plazaContent').innerHTML,/&lt;img/);
+    assert.doesNotMatch(p.elements.get('plazaContent').innerHTML,/<img src=x/);
+    assert.equal(p.streams.length,0);
+});
+
+test('a slow previous region cannot overwrite the newly selected bundled chart', async () => {
+    const p=player();
+    p.run(`fetch=()=>new Promise(resolve=>{window.finishUs=resolve}); window.pendingUs=loadTopCharts('us');country='gb';fetch=async()=>({ok:true,json:async()=>({categories:[{name:'All Podcasts',shows:[]}],shows:{},capturedAt:'2026-10-05',source:'https://example.org/'})})`);
+    await p.run("loadTopCharts('gb')");
+    const latest=p.elements.get('plazaContent').innerHTML;
+    p.run(`window.finishUs({ok:true,json:async()=>({categories:[{name:'All Podcasts',shows:[]}],shows:{}})})`);
+    await p.run('window.pendingUs');
+    assert.equal(p.elements.get('plazaContent').innerHTML,latest);
 });

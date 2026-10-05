@@ -49,6 +49,7 @@ STATIC_DIR = os.path.join(BASE_DIR, "static")
 os.makedirs(STATIC_DIR, exist_ok=True)
 
 app.mount("/cache", StaticFiles(directory=CACHE_DIR), name="cache")
+app.mount("/assets/podcast-charts", StaticFiles(directory=os.path.join(STATIC_DIR,"podcast-charts")), name="podcast-charts")
 
 @app.on_event("startup")
 async def trim_old_caches():
