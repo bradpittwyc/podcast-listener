@@ -681,6 +681,15 @@ def index_page():
             return f.read()
     return "<h1>Loading...</h1>"
 
+@app.get("/podfollow", response_class=HTMLResponse)
+@app.get("/charts", response_class=HTMLResponse)
+def podfollow_page():
+    path = os.path.join(STATIC_DIR, "podfollow.html")
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
+    return "<h1>PodFollow Japan loading...</h1>"
+
 if __name__ == "__main__":
     host = os.environ.get("HOST", "127.0.0.1")
     port = int(os.environ.get("PORT", "8557"))
