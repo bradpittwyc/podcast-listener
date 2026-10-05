@@ -125,6 +125,7 @@ public final class NativeBackend implements AutoCloseable {
         if(r.path.equals("/") && r.method.equals("GET")) {
             String html=new String(read(context.getAssets().open("index.html"),2*1024*1024),StandardCharsets.UTF_8)
                 .replace("https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css","/assets/fontawesome.css")
+                .replace("width=device-width, initial-scale=1.0","width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no")
                 .replace("密钥保存在本地服务的 .env 文件中。","密钥加密保存在当前设备中。")
                 .replace("新配置用于后续转写任务。","当前设备可独立下载和转写，无需连接电脑。");
             response(output,200,"text/html; charset=utf-8",bytes(html)); return;
