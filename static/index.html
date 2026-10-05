@@ -1111,7 +1111,6 @@ body.android-runtime .android-only{display:inline-flex!important}
 .chart-category-select{margin:8px 10px;width:calc(100% - 20px);padding:9px;background:var(--panel-left-bg);color:var(--text);border:1px solid var(--border);border-radius:8px;font-size:12px}
 .chart-description{padding:12px;border-bottom:1px solid var(--border);font-size:12px;line-height:1.7;color:var(--text2)}
 .chart-description h4{color:var(--text);margin:6px 0}.chart-description p{white-space:pre-line;overflow-wrap:anywhere}
-.chart-source{padding:10px;font-size:10px;color:var(--text3);line-height:1.5}.chart-source a{color:var(--purple-light)}
 .pod-card[data-chart-slug]{cursor:pointer}.pod-card[data-chart-slug]:focus-visible{outline:2px solid var(--purple-light);outline-offset:2px}
 </style>
 <style>
@@ -1282,12 +1281,8 @@ body.android-runtime .android-only{display:inline-flex!important}
                 <button onclick="doSearch()"><i class="fa-solid fa-magnifying-glass"></i></button>
             </div>
             <div class="region-row">
-                <button class="rbtn active" id="rb-us" onclick="switchRegion('us')">US</button>
-                <button class="rbtn" id="rb-gb" onclick="switchRegion('gb')">UK</button>
-                <button class="rbtn" id="rb-ca" onclick="switchRegion('ca')">CA</button>
-                <button class="rbtn" id="rb-au" onclick="switchRegion('au')">AU</button>
-                <button class="rbtn" id="rb-jp" onclick="switchRegion('jp')">JP</button>
-                <button class="rbtn" id="rb-de" onclick="switchRegion('de')">DE</button>
+                <button class="rbtn active" id="rb-us" onclick="switchRegion('us')">United States</button>
+                <button class="rbtn" id="rb-gb" onclick="switchRegion('gb')">United Kingdom</button>
             </div>
             <div class="preset-row">
                 <div class="chip" onclick="preset('The Daily')">The Daily</div>
@@ -1946,7 +1941,7 @@ function renderBundledChart(region) {
         const show=snapshot.shows[slug];if(!show)return;
         html += `<div class="pod-card" role="button" tabindex="0" data-chart-slug="${escHtml(slug)}" aria-label="${escHtml(show.title)}"><img src="${escHtml(show.thumbnail)}" onerror="recoverCover(this)" alt="" loading="lazy"><div class="pod-card-info"><div class="pod-card-title">${index+1}. ${escHtml(show.title)}</div><div class="pod-card-artist">${escHtml(show.author)}</div></div></div>`;
     });
-    html += `</div><div class="chart-source">榜单快照 · ${escHtml(snapshot.capturedAt)} · <a href="${escHtml(snapshot.source)}" target="_blank" rel="noopener noreferrer">来源网页</a></div>`;
+    html += `</div>`;
     setPlaza(html);
 }
 function selectPlazaCategory(value) {
