@@ -359,15 +359,15 @@ def define_word(word: str = Query(..., min_length=1), context: str = ""):
     Use Gemini AI to look up a word with phonetic, part of speech, English definition, 
     Chinese translation, and example sentence. Optionally context-aware.
     """
-    prompt = f"""You are a professional lexicographer and ESL teacher. Analyze the English word "{word}".
+    prompt = f"""You are a professional lexicographer and language teacher. Analyze the word or phrase "{word}" (which may be in English, Japanese, or another language).
     {"Context sentence: " + context if context else ""}
 
     Return ONLY a raw JSON object (no markdown codeblock, no triple backticks) with this structure:
     {{
         "word": "{word}",
-        "phonetic": "/.../",
+        "phonetic": "/.../ (or Hiragana/Romaji for Japanese)",
         "pos": "noun/verb/adj/adv etc.",
-        "definition_en": "Concise English definition",
+        "definition_en": "Concise definition",
         "translation_cn": "准确中文释义（含词性）",
         "example": "An engaging example sentence containing the word.",
         "example_cn": "例句的中文翻译",
@@ -478,7 +478,7 @@ async def ask_podcast_ai(request: Request):
     quote_section = f"【用户勾选引用的字幕语句】:\n{selected_text}\n" if selected_text else ""
     user_query = question if question else "请详细解析上述勾选字幕句子的语法结构、生词习语和地道用法。"
 
-    prompt = f"""你是一个专业、耐心的英语播客学习助教。
+    prompt = f"""你是一个专业、耐心的语言与播客学习助教（精通英语、日语等语言教学与剖析）。
 用户正在边听播客边学习，并向你提问。{transcript_status}
 以下是当前已获得的全部字幕背景：
 --- 播客背景转写 ---
@@ -490,9 +490,9 @@ async def ask_podcast_ai(request: Request):
 {user_query}
 
 请结合播客的上下文，给出清晰、详实、通俗易懂的解答：
-1. 若涉及生词或短语：说明其在此处播客语境中的确切含义与地道用法，并给出生动的例句；
-2. 若涉及复杂句式或语法：拆解句子结构并进行通俗解释；
-3. 若询问播客内容或背景：结合当前已获得的全部字幕进行提炼和解释。
+1. 若涉及生词或短语：说明其在此处播客语境中的确切含义与地道用法，并给出生动的例句。若为日语，请附上汉字假名读音（平假名/片假名）及词性；
+2. 若涉及复杂句式、语法或敬语：拆解句子结构（如日语句型、敬语/丁寧語/尊敬語/謙譲語、英语长难句拆解）并进行通俗解释；
+3. 若询问播客内容或背景：结合当前已获得的全部字幕进行精准提炼和总结。
 回答使用流畅自然的中文，可适当使用 Markdown 格式（粗体、列表、引用等），便于排版阅读。"""
 
     try:
