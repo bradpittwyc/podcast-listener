@@ -1284,11 +1284,10 @@ body.android-runtime .android-only{display:inline-flex!important}
                 <button class="rbtn" id="rb-de" onclick="switchRegion('de')">DE</button>
             </div>
             <div class="preset-row">
-                <div class="chip" onclick="preset('バイリンガルニュース')">バイリンガルニュース</div>
-                <div class="chip" onclick="preset('NHK ラジオニュース')">NHK ニュース</div>
-                <div class="chip" onclick="preset('Rebuild')">Rebuild.fm</div>
                 <div class="chip" onclick="preset('The Daily')">The Daily</div>
                 <div class="chip" onclick="preset('Huberman Lab')">Huberman</div>
+                <div class="chip" onclick="preset('Lex Fridman')">Lex Fridman</div>
+                <div class="chip" onclick="preset('NPR News Now')">NPR News</div>
             </div>
             <div id="plazaContent"><div class="spinner"></div></div>
         </div>
@@ -1473,7 +1472,6 @@ body.android-runtime .android-only{display:inline-flex!important}
             <div class="ai-quick-tags">
                 <button class="qtag" disabled onclick="quickAsk('语法拆解')">📖 语法拆解</button>
                 <button class="qtag" disabled onclick="quickAsk('地道用法')">🗣️ 地道用法</button>
-                <button class="qtag" disabled onclick="quickAsk('假名敬语')">🌸 假名/敬语</button>
                 <button class="qtag" disabled onclick="quickAsk('逐词翻译')">🌐 逐词翻译</button>
                 <button class="qtag" disabled onclick="quickAsk('全文要点')">📝 全文要点</button>
             </div>
@@ -2771,8 +2769,6 @@ function quickAsk(type) {
         prompt = quotes ? '请详细拆解并分析上述选定字幕句子的语法结构与从句连接。' : '请帮我梳理本期播客中出现的核心复杂语法结构。';
     } else if (type === '地道用法') {
         prompt = quotes ? '请解析选定字幕中的地道习语、俚语或高阶表达，并给出两个生动的日常造句。' : '请提炼本期播客中最值得学习的地道口语表达。';
-    } else if (type === '假名敬语') {
-        prompt = quotes ? '请对上述选定字幕标注汉字的假名读音（平假名/片假名），并详细拆解其中涉及的敬语/丁寧語/尊敬語/謙譲語或口语表达。' : '请梳理本期播客中出现的重点汉字读音（假名）与敬语/口语表达。';
     } else if (type === '逐词翻译') {
         prompt = quotes ? '请将上述选定字幕逐句给出精准、自然的中文对照翻译。' : '请总结当前听到段落的中文大意。';
     } else if (type === '全文要点') {
