@@ -7,6 +7,7 @@ import threading
 import math
 import shutil
 import aliyun
+import gemini_transcription
 import corrections
 import subtitle_translation
 import cache_policy
@@ -61,7 +62,7 @@ settings_lock = threading.Lock()
 corrections_lock = threading.Lock()
 KEY_FIELDS = {"gemini_key": "GEMINI_API_KEY",
               "aliyun_key_1": "DASHSCOPE_API_KEY_1", "aliyun_key_2": "DASHSCOPE_API_KEY_2"}
-OPTION_FIELDS = {"subtitle_provider": ("AI_PROVIDER", ("aliyun",)),
+OPTION_FIELDS = {"subtitle_provider": ("AI_PROVIDER", ("gemini",)),
                  "tutor_provider": ("TUTOR_PROVIDER", ("qwen", "gemini")),
                  "translation_provider": ("TRANSLATION_PROVIDER", ("gemini", "qwen")),
                  "dictionary_provider": ("DICTIONARY_PROVIDER", ("auto", "qwen", "gemini")),
@@ -290,7 +291,7 @@ def get_or_generate_transcript(audio_url: str, title: str = "", transcript_url: 
             cues.append(event["cue"])
         elif status == "error":
             return {"source": "error", "detail": event["detail"], "vtt": ""}
-    return {"source": "aliyun_streaming", "vtt": to_vtt(cues), "local_audio": local_audio}
+    return {"source": "gemini_transcribe", "vtt": to_vtt(cues), "local_audio": local_audio}
 
 
 @app.get("/api/transcribe_stream")
@@ -342,7 +343,7 @@ def retranscribe_sentence(body: dict):
                 start, end = previous['source_start'], previous['source_end']
                 break
         _, audio_path, _ = cache_paths(CACHE_DIR, url)
-        cue = aliyun.regenerate(url, audio_path, start, end, stopped=stopped)
+        cue = gemini_transcription.regenerate(url, audio_path, start, end, stopped=stopped, proxies=get_local_proxy())
         if stopped.is_set():
             raise HTTPException(409, '转写已取消。')
         with corrections_lock:

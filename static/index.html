@@ -1309,15 +1309,15 @@ body.android-runtime .android-only{display:inline-flex!important}
 <dialog id="settingsDialog" aria-labelledby="settingsTitle" oncancel="closeSettings()">
     <form onsubmit="saveApiSettings(event)">
         <div class="settings-heading"><h3 id="settingsTitle">API Key 设置</h3><button type="button" onclick="closeSettings()" aria-label="关闭设置">×</button></div>
-        <p class="settings-note">密钥保存在本地服务的 .env 文件中。留空保留原配置。两个 Key 按转写段交替使用；新配置用于后续转写任务。</p>
-        <label for="subtitleProvider">字幕转写服务</label><select id="subtitleProvider"><option value="aliyun">阿里云 Streaming</option></select>
+        <p class="settings-note">留空保留已保存的密钥。Web 字幕转写使用 Gemini Key；阿里云 Key 用于选用 Qwen 的功能。新配置用于后续任务。</p>
+        <label for="subtitleProvider">字幕转写服务</label><select id="subtitleProvider"><option id="geminiSubtitleOption" value="gemini">Gemini 3.5 Transcribe</option><option id="aliyunSubtitleOption" value="aliyun" hidden>阿里云 Streaming</option></select>
         <label for="aliyunRegion">阿里云地域</label><select id="aliyunRegion"><option value="beijing">中国内地 · 北京</option><option value="singapore">国际站 · 新加坡</option></select>
         <label for="dictionaryProvider">查词模型</label><select id="dictionaryProvider"><option value="auto">自动：开启代理用 Gemini，关闭用 Qwen</option><option value="qwen">阿里云 Qwen</option><option value="gemini">Gemini</option></select>
         <label for="translationProvider">翻译模型</label><select id="translationProvider"><option value="gemini">Gemini</option><option value="qwen">阿里云 Qwen</option></select>
         <label for="tutorProvider">助教模型</label><select id="tutorProvider"><option value="qwen">阿里云 Qwen</option><option value="gemini">Gemini</option></select>
         <label for="aliyunKey1">阿里云百炼 API Key 1</label><input id="aliyunKey1" type="password" autocomplete="new-password" spellcheck="false">
         <label for="aliyunKey2">阿里云百炼 API Key 2</label><input id="aliyunKey2" type="password" autocomplete="new-password" spellcheck="false">
-        <label for="geminiKey">Gemini API Key（AI 聊天）</label><input id="geminiKey" type="password" autocomplete="new-password" spellcheck="false">
+        <label for="geminiKey">Gemini API Key（字幕转写及 AI 功能）</label><input id="geminiKey" type="password" autocomplete="new-password" spellcheck="false">
         <p id="settingsStatus" role="status" aria-live="polite"></p>
         <button id="saveSettingsBtn" type="submit">保存设置</button>
     </form>
@@ -2531,8 +2531,13 @@ function triggerAiTranscribe(auto = false, resume = false) {
         cancelTranscriptionJob(jobId);
         finish();
         setBadge('转写失败', 'rgba(245,158,11,.15)', '#fbbf24', 'rgba(245,158,11,.3)');
+        if (!retryable && !isAndroidPlayback() && detail) {
+            setBadge('转写受限', 'rgba(245,158,11,.15)', '#fbbf24', 'rgba(245,158,11,.3)');
+            document.getElementById('subBadge').title = detail;
+            toast(detail, 'info');
+        }
         if (!cues.length && subScr) {
-            subScr.textContent = retryable ? '字幕连接中断，正在重试。' : '字幕加载失败，请检查设置后重试。';
+            subScr.textContent = retryable ? '字幕连接中断，正在重试。' : (!isAndroidPlayback() && detail ? detail : '字幕加载失败，请检查设置后重试。');
             audio.pause();
         }
         if (retryable && reconnectAttempts < 5 && totalTranscriptionRetries < 20) {
@@ -2555,9 +2560,11 @@ function triggerAiTranscribe(auto = false, resume = false) {
         subtitleLastActivity = lastActivity;
         let lastAdvance = Date.now();
         let decodedUntil = -1;
+        let downloadedBytes = -1;
+        let advanceTimeout = 180000;
         subtitleWatchdog = setInterval(() => {
             if (request !== subtitleRequest || stream !== subtitleStream) return;
-            if (Date.now() - lastActivity > 45000 || Date.now() - lastAdvance > 180000) fail('字幕连接或转写进度停滞，正在从断点恢复。');
+            if (Date.now() - lastActivity > 45000 || Date.now() - lastAdvance > advanceTimeout) fail('字幕连接或转写进度停滞，正在从断点恢复。');
         }, 5000);
         stream.onmessage = (e) => {
             if (request !== subtitleRequest || stream !== subtitleStream) return;
@@ -2567,6 +2574,17 @@ function triggerAiTranscribe(auto = false, resume = false) {
             try { data = JSON.parse(e.data); }
             catch { fail('响应格式异常，请重试。'); return; }
             if (data.status === 'heartbeat') return;
+            if (data.status === 'download_progress' && !isAndroidPlayback()) {
+                if (Number.isFinite(data.bytes) && data.bytes > downloadedBytes) {
+                    downloadedBytes = data.bytes; lastAdvance = Date.now();
+                }
+                return;
+            }
+            if (data.status === 'progress' && !isAndroidPlayback() && Number.isFinite(data.timeout_seconds)
+                && data.timeout_seconds >= 180 && data.timeout_seconds <= 900) {
+                advanceTimeout = data.timeout_seconds * 1000;
+                lastAdvance = Date.now();
+            }
             if (data.status === 'decode_progress') {
                 if (Number.isFinite(data.until) && data.until > decodedUntil) {
                     decodedUntil = data.until; lastAdvance = Date.now();
@@ -3357,7 +3375,9 @@ function toast(msg, type = 'info') {
 // ══════════════════════════════════════════════
 const apiKeyInputs = {gemini_key:'geminiKey',aliyun_key_1:'aliyunKey1',aliyun_key_2:'aliyunKey2'};
 function applyProviderSettings(options = {}) {
-    document.getElementById('subtitleProvider').value = 'aliyun';
+    document.getElementById('subtitleProvider').value = isAndroidPlayback() ? 'aliyun' : 'gemini';
+    document.getElementById('geminiSubtitleOption').hidden = isAndroidPlayback();
+    document.getElementById('aliyunSubtitleOption').hidden = !isAndroidPlayback();
     if (isAndroidPlayback()) {
         document.querySelector('#subtitleProvider option[value="aliyun"]').textContent = '阿里云 Qwen · 单 Key 实时';
         document.querySelector('label[for="aliyunKey1"]').textContent = '阿里云百炼 API Key 1（实时转写）';

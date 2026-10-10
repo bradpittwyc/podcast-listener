@@ -10,6 +10,11 @@ from aliyun import api_keys
 
 
 class SettingsTests(unittest.TestCase):
+    def test_web_subtitles_use_gemini_even_with_legacy_provider_config(self):
+        with patch.dict(os.environ, {'AI_PROVIDER': 'aliyun'}):
+            result = TestClient(app.app).get('/api/settings').json()
+        self.assertEqual(result['options']['subtitle_provider'], 'gemini')
+
     def test_translation_provider_persists_and_rejects_unknown_models(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / '.env'

@@ -135,9 +135,11 @@ test('dictionary provider loads and is sent with settings', async () => {
     const p = player();
     p.run("applyProviderSettings({dictionary_provider:'gemini',aliyun_region:'beijing'})");
     assert.equal(p.elements.get('dictionaryProvider').value, 'gemini');
+    assert.equal(p.elements.get('subtitleProvider').value, 'gemini');
     p.elements.get('dictionaryProvider').value = 'qwen';
     await p.run('saveApiSettings({preventDefault(){}})');
     assert.equal(JSON.parse(p.fetchCalls[0][1].body).dictionary_provider, 'qwen');
+    assert.equal(JSON.parse(p.fetchCalls[0][1].body).subtitle_provider, 'gemini');
 });
 
 test('wait for complete first chunk before playing; audio_ready never starts playback', () => {
@@ -266,6 +268,26 @@ test('permanent configuration errors do not auto-retry', () => {
     const p = player(); p.start();
     p.streams[0].emit({status:'error',detail:'Missing key',retryable:false});
     assert.equal(p.timers.filter(t => !t.cleared).length, 0);
+});
+
+test('Web long segments allow bounded processing time while retaining the stall watchdog', () => {
+    const p=player();p.start();const stream=p.streams[0];
+    stream.emit({status:'progress',detail:'正在转写第 1 段',timeout_seconds:780});
+    for(let i=0;i<52;i++){p.advance(15000);stream.emit({status:'heartbeat'});}
+    assert.equal(p.timers.filter(t=>!t.cleared).length,0);
+    p.advance(15000);
+    assert.ok(p.timers.some(t=>!t.cleared));
+});
+
+test('Web quota errors display the actual reason and preserve subtitles without retrying', () => {
+    const p=player();p.start();p.run('globalThis.notices=[];toast=message=>notices.push(message)');
+    p.streams[0].emit(cue(0,20));
+    const detail='Gemini 免费转写每日额度已用完（25 次/天）。约 23 小时 58 分钟后恢复。';
+    p.streams[0].emit({status:'error',detail,retryable:false});
+    assert.equal(p.run('cues.length'),1);
+    assert.equal(p.elements.get('subBadge').title,detail);
+    assert.equal(p.run('notices[0]'),detail);
+    assert.equal(p.timers.filter(t=>!t.cleared).length,0);
 });
 
 test('chat enables on the first cue and sends all current corrected subtitles, question and selected examples', async () => {
@@ -627,6 +649,7 @@ test('tutor model is loaded and saved separately from translation', async () => 
     const body=JSON.parse(p.fetchCalls[0][1].body);
     assert.equal(body.tutor_provider,'qwen');assert.equal(body.translation_provider,'qwen');
 });
+
 
 test('bundled charts preserve source episode order and escape descriptions', async () => {
     const p=player();

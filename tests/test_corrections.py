@@ -30,7 +30,7 @@ class CorrectionTests(unittest.TestCase):
             url = 'https://example.com/audio'; path = corrections.path_for(directory, url)
             corrections.save(path, {'start': 10.2, 'end': 14.8, 'text': 'First.', 'source_start': 10, 'source_end': 15})
             updated = {'start': 10.1, 'end': 14.9, 'text': 'Second.', 'source_start': 10, 'source_end': 15}
-            with patch.object(app.aliyun, 'regenerate', return_value=updated) as regenerate:
+            with patch.object(app.gemini_transcription, 'regenerate', return_value=updated) as regenerate:
                 result = TestClient(app.app).post('/api/retranscribe_sentence', json={'audio_url': url, 'start': 10.2, 'end': 14.8})
             self.assertEqual(result.status_code, 200)
             self.assertEqual(regenerate.call_args.args[2:], (10, 15))
@@ -42,7 +42,7 @@ class CorrectionTests(unittest.TestCase):
             original={'start':10,'end':15,'source_start':10,'source_end':15,'text':'Preserved.'}
             corrections.save(path,original)
             client=TestClient(app.app)
-            with patch.object(app.aliyun,'regenerate',side_effect=app.aliyun.ASRError('Failed')) as regenerate:
+            with patch.object(app.gemini_transcription,'regenerate',side_effect=app.gemini_transcription.ASRError('Failed')) as regenerate:
                 self.assertEqual(client.post('/api/retranscribe_sentence',json={'audio_url':url,'start':10,'end':15}).status_code,502)
                 self.assertEqual(corrections.load(path),[original])
                 self.assertEqual(client.post('/api/retranscribe_sentence',json={'audio_url':url,'start':10,'end':400}).status_code,400)

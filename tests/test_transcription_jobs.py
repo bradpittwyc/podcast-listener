@@ -56,7 +56,7 @@ class JobTests(unittest.TestCase):
         from unittest.mock import patch
         client = TestClient(app.app)
         client.post('/api/cancel_transcription', json={'request_id':'before-start-test'})
-        with patch('transcription.aliyun.transcript_events') as provider:
+        with patch('transcription.gemini_transcription.transcript_events') as provider:
             response = client.get('/api/transcribe_stream', params={'audio_url':'https://example.com/audio.mp3','request_id':'before-start-test'})
         provider.assert_not_called()
         self.assertNotIn('"status": "progress"', response.text)

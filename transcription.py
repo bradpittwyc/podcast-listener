@@ -1,4 +1,4 @@
-"""Alibaba streaming transcription with atomic caches and cancellable SSE."""
+"""Gemini transcription with atomic caches and cancellable SSE."""
 
 import hashlib
 import json
@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 import requests
-import aliyun
+import gemini_transcription
 import corrections
 
 _locks = [threading.Lock() for _ in range(32)]
@@ -61,7 +61,7 @@ def chunk_seconds(offset):
 
 def cache_paths(cache_dir, audio_url):
     key = hashlib.md5(audio_url.encode("utf-8")).hexdigest()
-    subtitle_key = key + '-aliyun-sentences-v2'
+    subtitle_key = key + gemini_transcription.CACHE_SUFFIX
     return key, Path(cache_dir) / f"{key}.mp3", Path(cache_dir) / f"{subtitle_key}.vtt"
 
 
@@ -138,7 +138,7 @@ def transcript_events(audio_url, transcript_url, force_refresh, cache_dir, proxi
 def _transcript_events(audio_url, transcript_url, force_refresh, cache_dir, proxies=None, stopped=None):
     stopped = stopped if stopped is not None else threading.Event()
     key, audio_path, vtt_path = cache_paths(cache_dir, audio_url)
-    checkpoint_key = key + '-aliyun-sentences-v2'
+    checkpoint_key = key + gemini_transcription.CACHE_SUFFIX
     checkpoint_path = Path(cache_dir) / f"{checkpoint_key}.progress.json"
     lock = _locks[int(key[:8], 16) % len(_locks)]
     while not lock.acquire(timeout=0.2):
@@ -148,6 +148,8 @@ def _transcript_events(audio_url, transcript_url, force_refresh, cache_dir, prox
         if force_refresh:
             checkpoint_path.unlink(missing_ok=True)
             vtt_path.unlink(missing_ok=True)
+            for segment_path in checkpoint_path.parent.glob(checkpoint_path.stem + '.segment-*.json'):
+                segment_path.unlink(missing_ok=True)
         if stopped.is_set():
             return
         if transcript_url and not force_refresh:
@@ -166,11 +168,11 @@ def _transcript_events(audio_url, transcript_url, force_refresh, cache_dir, prox
                 yield {"status": "cached", "vtt": content, "local_audio": f"/cache/{key}.mp3"}
                 return
 
-        if not aliyun.api_keys():
-            raise TranscriptionError("字幕服务未配置，请检查设置", retryable=False)
+        if not gemini_transcription.api_key():
+            raise TranscriptionError("请在设置中填写 Gemini API Key。", retryable=False)
         if not shutil.which("ffmpeg"):
             raise TranscriptionError("找不到 FFmpeg；请安装并加入 PATH 后重启服务。", retryable=False)
-        yield from aliyun.transcript_events(audio_url, audio_path, vtt_path, checkpoint_path, proxies, stopped)
+        yield from gemini_transcription.transcript_events(audio_url, audio_path, vtt_path, checkpoint_path, proxies, stopped)
     except Exception as exc:
         # Avoid returning request URLs or authorization information in errors.
         detail = str(exc) if isinstance(exc, RuntimeError) else "字幕转写失败，请检查网络或音频后重试。"

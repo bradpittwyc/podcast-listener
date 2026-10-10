@@ -17,7 +17,7 @@ class TranscriptionTests(unittest.TestCase):
         tutor = patch.dict(os.environ, {"TUTOR_PROVIDER": "gemini"})
         tutor.start()
         self.addCleanup(tutor.stop)
-        keys = patch.dict(os.environ, {"DASHSCOPE_API_KEY": "", "DASHSCOPE_API_KEY_1": "", "DASHSCOPE_API_KEY_2": ""})
+        keys = patch.dict(os.environ, {"GEMINI_API_KEY": "", "GEMINI_TRANSCRIPTION_KEY_1": "", "GEMINI_TRANSCRIPTION_KEY_2": "", "GEMINI_TRANSCRIPTION_KEY_3": "", "GEMINI_TRANSCRIPTION_KEY_4": "", "GEMINI_TRANSCRIPTION_KEY_5": "", "DASHSCOPE_API_KEY": "", "DASHSCOPE_API_KEY_1": "", "DASHSCOPE_API_KEY_2": ""})
         keys.start()
         self.addCleanup(keys.stop)
         self.temp = tempfile.TemporaryDirectory()
@@ -70,7 +70,7 @@ class TranscriptionTests(unittest.TestCase):
     def test_disconnect_stops_before_next_api_request(self):
         stopped = threading.Event()
         stopped.set()
-        with patch.object(stt.aliyun, "transcript_events") as provider:
+        with patch.object(stt.gemini_transcription, "transcript_events") as provider:
             self.assertEqual(list(stt.transcript_events(self.url, "", False, self.cache, stopped=stopped)), [])
         provider.assert_not_called()
 

@@ -6,7 +6,8 @@ from pathlib import Path
 
 def path_for(cache_dir, audio_url):
     from transcription import cache_paths
-    return Path(cache_dir) / (cache_paths(cache_dir, audio_url)[0] + '-aliyun-corrections.json')
+    from gemini_transcription import CACHE_SUFFIX
+    return Path(cache_dir) / (cache_paths(cache_dir, audio_url)[0] + CACHE_SUFFIX + '-corrections.json')
 
 
 def identity(cue):
